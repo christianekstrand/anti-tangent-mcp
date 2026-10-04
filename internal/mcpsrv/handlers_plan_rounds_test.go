@@ -532,3 +532,191 @@ func TestValidatePlan_ARulingDoesNotWaiveATruncatedRoundsFinding(t *testing.T) {
 	assert.Equal(t, "reviewer_response", ruled.PlanFindings[0].Criterion)
 	assert.Equal(t, cut.PlanFindings[0].ID, ruled.PlanFindings[0].ID)
 }
+
+func TestPlanRound_HashesKeepBytesJSONWouldReplace(t *testing.T) {
+	a := planparser.RawTask{Title: "Task 1: a", Body: "### Task 1: a\n\nbody \xff\n"}
+	b := planparser.RawTask{Title: "Task 1: a", Body: "### Task 1: a\n\nbody \xfe\n"}
+	assert.NotEqual(t, planTaskHash(a), planTaskHash(b), "two bodies that differ only in invalid UTF-8 are two tasks")
+	assert.NotEqual(t,
+		planTaskHash(planparser.RawTask{Title: "ab", Body: "c"}),
+		planTaskHash(planparser.RawTask{Title: "a", Body: "bc"}), "a field boundary is part of the hash")
+
+	h := newTestPlanHandlers(t)
+	tasks := buildRawTasks("Task 1: a")
+	assert.NotEqual(t,
+		h.newPlanRound("", "pre \xff", tasks, planInputs{}).planKey,
+		h.newPlanRound("", "pre \xfe", tasks, planInputs{}).planKey)
+	assert.NotEqual(t, planInputs{ProjectKnowledge: "k \xff"}.key(), planInputs{ProjectKnowledge: "k \xfe"}.key())
+}
+
+func TestPlanInputs_KeyIgnoresHowTheSameReviewWasAskedFor(t *testing.T) {
+	assert.Equal(t, planInputs{Model: "m"}.key(), planInputs{Model: "m", Mode: "thorough"}.key(),
+		"an omitted mode is the thorough review")
+	assert.NotEqual(t, planInputs{Model: "m"}.key(), planInputs{Model: "m", Mode: "quick"}.key())
+
+	x := fileSource{Path: "/r/x.go", Bytes: 3, SHA256: "aa"}
+	y := fileSource{Path: "/r/y.go", Bytes: 4, SHA256: "bb"}
+	inOrder := planInputs{ContextFiles: []fileSource{x, y}}
+	reversed := planInputs{ContextFiles: []fileSource{y, x}}
+	assert.Equal(t, inOrder.key(), reversed.key(), "the same attached files in another order are the same inputs")
+	assert.Equal(t, []fileSource{y, x}, reversed.ContextFiles, "the caller's slice is not reordered")
+	assert.NotEqual(t, inOrder.key(), planInputs{ContextFiles: []fileSource{x, {Path: "/r/y.go", Bytes: 4, SHA256: "cc"}}}.key())
+	assert.NotEqual(t, inOrder.key(), planInputs{ContextFiles: []fileSource{x}}.key())
+}
+
+func TestUnknownPlanRunAdvisory_CapsTheEchoedID(t *testing.T) {
+	long := strings.Repeat("x", 5000)
+	f := unknownPlanRunAdvisory(long, "pr_0123456789ab")
+	assert.Contains(t, f.Evidence, "plan_run_id "+strings.Repeat("x", 64)+"… names no live plan run")
+	assert.Less(t, len(f.Evidence), 400)
+	assert.Contains(t, unknownPlanRunAdvisory("pr_short", "pr_0123456789ab").Evidence, "plan_run_id pr_short names no live plan run")
+}
+
+func TestPlanCallContext_ARunThatExpiredDuringItsRoundIsReported(t *testing.T) {
+	h := newTestPlanHandlers(t)
+	tasks := buildRawTasks("Task 1: a")
+	call := planCallContext{
+		PlanRuns: h.deps.PlanRuns,
+		Round:    planRound{RunID: "pr_gone00000000", Revision: 1},
+		Tasks:    tasks,
+	}
+	pr := verdict.PlanResult{
+		PlanVerdict: verdict.VerdictPass,
+		Tasks:       []verdict.PlanTaskResult{{TaskIndex: 1, TaskTitle: "Task 1: a", Verdict: verdict.VerdictPass}},
+		ReviewScope: &verdict.PlanReviewScope{Revision: 2, TasksReviewed: 1},
+	}
+
+	call.settlePlanRun(&pr, &planReview{})
+	call.finish(&pr)
+
+	assert.NotEqual(t, "pr_gone00000000", pr.PlanRunID)
+	_, _, ok := h.deps.PlanRuns.Review(pr.PlanRunID)
+	assert.True(t, ok, "the review is stored on the run minted in its place")
+	assert.Equal(t, 1, pr.ReviewScope.Revision)
+	require.Len(t, pr.PlanFindings, 1)
+	assert.Equal(t, "plan_run_id", pr.PlanFindings[0].Criterion)
+	assert.Equal(t, verdict.SeverityMinor, pr.PlanFindings[0].Severity)
+	assert.Contains(t, pr.PlanFindings[0].Evidence, "plan_run_id pr_gone00000000 names no live plan run")
+	assert.Contains(t, pr.PlanFindings[0].Suggestion, "plan_run_id="+pr.PlanRunID)
+	assert.Equal(t, verdict.VerdictPass, pr.PlanVerdict)
+}
+
+func TestValidatePlan_ATruncatedRoundRecordsItsCarriedTasks(t *testing.T) {
+	dir := t.TempDir()
+	h, sr := roundHandlers(t, 8,
+		roundSingleResp("", roundTitles(3)...),
+		roundPlanLevelResp("", "n"),
+		providers.Response{RawJSON: []byte(`{"tasks":[`)},
+	)
+	sr.errors = []error{nil, nil, providers.ErrResponseTruncated}
+	h.deps.Stats = newStatsRecorder(t, dir)
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: buildPlanWithNTasks(3)})
+
+	cut := validatePlanRound(t, h, ValidatePlanArgs{PlanText: planWithEditedTask(3, 2), PlanRunID: first.PlanRunID})
+	require.True(t, cut.Partial)
+
+	b, err := os.ReadFile(filepath.Join(dir, "events.jsonl"))
+	require.NoError(t, err)
+	events := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	require.Len(t, events, 2)
+	assert.Contains(t, events[1], `"partial":true`)
+	assert.Contains(t, events[1], `"tasks_carried":2`)
+}
+
+func TestValidatePlan_ACachedPassIsNotServedOnceItsRunWasRevisedUnderOtherInputs(t *testing.T) {
+	h, sr := roundHandlers(t, 8,
+		roundSingleResp("", roundTitles(2)...),
+		roundPlanLevelResp("", "n"),
+		roundChunkResp(roundTitles(2)...),
+		roundSingleResp("", roundTitles(2)...),
+	)
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: buildPlanWithNTasks(2)})
+	require.Equal(t, verdict.VerdictPass, first.PlanVerdict)
+	validatePlanRound(t, h, ValidatePlanArgs{
+		PlanText: buildPlanWithNTasks(2), PlanRunID: first.PlanRunID, ProjectKnowledge: "Decision: tasks run in order.",
+	})
+	require.Equal(t, 3, sr.calls)
+
+	again := validatePlanRound(t, h, ValidatePlanArgs{PlanText: buildPlanWithNTasks(2)})
+
+	assert.Equal(t, 4, sr.calls, "the run now holds a review made under other inputs, so the entry is not served")
+	assert.NotEqual(t, first.PlanRunID, again.PlanRunID)
+}
+
+const roundUnverifiable = `{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"Registry.Lookup is assumed to exist","suggestion":"verify"}`
+
+func TestValidatePlan_ATruncatedRoundLabelsACarriedTaskByItsPlanPosition(t *testing.T) {
+	plan := "# Plan\n\n" +
+		"### Task 1: Setup\n\n**Goal:** g1\n\n**Acceptance criteria:**\n- ac1\n\n" +
+		"### Task 2: Add tests\n\n**Goal:** g2\n\n**Acceptance criteria:**\n- ac2\n\n" +
+		"### Task 3: Add tests\n\n**Goal:** g3\n\n**Acceptance criteria:**\n- ac3\n\n"
+	h, sr := roundHandlers(t, 8,
+		roundSingleResp("",
+			roundTask{title: "Task 1: Setup"},
+			roundTask{title: "Task 2: Add tests"},
+			roundTask{title: "Task 3: Add tests", findings: []string{roundUnverifiable}}),
+		roundPlanLevelResp("", "n"),
+		providers.Response{RawJSON: []byte(`{"tasks":[`)},
+	)
+	sr.errors = []error{nil, nil, providers.ErrResponseTruncated}
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: plan})
+	require.Len(t, first.CodebaseReferenceChecklist, 1)
+	require.True(t, strings.HasPrefix(first.CodebaseReferenceChecklist[0], "Task 3: "))
+
+	cut := validatePlanRound(t, h, ValidatePlanArgs{
+		PlanText: strings.Replace(plan, "- ac2\n", "- ac2, measured\n", 1), PlanRunID: first.PlanRunID,
+	})
+
+	require.True(t, cut.Partial)
+	require.Len(t, cut.Tasks, 2)
+	assert.Equal(t, []int{1, 3}, []int{cut.Tasks[0].TaskIndex, cut.Tasks[1].TaskIndex})
+	require.Len(t, cut.CodebaseReferenceChecklist, 1)
+	assert.Equal(t, first.CodebaseReferenceChecklist[0], cut.CodebaseReferenceChecklist[0],
+		"the carried task's line keeps its plan number, not its position among the results returned")
+}
+
+func TestValidatePlan_ARoundCutInItsSecondChunkKeepsTheFirstChunksResults(t *testing.T) {
+	h, sr := roundHandlers(t, 2,
+		passOneResp(),
+		chunkResp(t, titlesRange(1, 2)),
+		chunkResp(t, titlesRange(3, 4)),
+		roundPlanLevelResp("", "n"),
+		roundChunkResp(roundTask{title: "Task 1: t1", findings: []string{roundMajor}}, roundTask{title: "Task 2: t2"}),
+		providers.Response{RawJSON: []byte(`{"tasks":[`)},
+	)
+	sr.errors = []error{nil, nil, nil, nil, nil, providers.ErrResponseTruncated}
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: buildPlanWithNTasks(4)})
+	require.Equal(t, 3, sr.calls)
+
+	edited := buildPlanWithNTasks(4)
+	for _, k := range []int{1, 2, 4} {
+		edited = strings.Replace(edited, fmt.Sprintf("- ac%d\n", k), fmt.Sprintf("- ac%d, measured\n", k), 1)
+	}
+	cut := validatePlanRound(t, h, ValidatePlanArgs{PlanText: edited, PlanRunID: first.PlanRunID})
+
+	assert.Equal(t, 6, sr.calls, "the plan-level pass and both chunks were sent")
+	assert.True(t, cut.Partial)
+	assert.Equal(t, verdict.VerdictWarn, cut.PlanVerdict)
+	require.Len(t, cut.Tasks, 3, "the first chunk's two tasks and the carried one")
+	assert.Equal(t, []string{"Task 1: t1", "Task 2: t2", "Task 3: t3"},
+		[]string{cut.Tasks[0].TaskTitle, cut.Tasks[1].TaskTitle, cut.Tasks[2].TaskTitle})
+	assert.Equal(t, []int{1, 2, 3}, []int{cut.Tasks[0].TaskIndex, cut.Tasks[1].TaskIndex, cut.Tasks[2].TaskIndex})
+	assert.Len(t, cut.Tasks[0].Findings, 1, "a task reviewed before the cut keeps its new result")
+	unfinished := cut.PlanFindings[len(cut.PlanFindings)-1]
+	assert.Equal(t, "reviewer_response", unfinished.Criterion)
+	assert.Contains(t, unfinished.Evidence, "1 of the plan's 4 task(s) have no result")
+}
+
+func TestValidatePlan_AnUnchangedRoundOnAFailingReviewMakesNoReviewerCall(t *testing.T) {
+	critical := `{"severity":"critical","category":"ambiguous_spec","criterion":"ac1","evidence":"contradicts the goal","suggestion":"rewrite"}`
+	h, sr := roundHandlers(t, 8, roundSingleResp(critical, roundTitles(2)...))
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: buildPlanWithNTasks(2)})
+	require.Equal(t, verdict.VerdictFail, first.PlanVerdict)
+
+	second := validatePlanRound(t, h, ValidatePlanArgs{PlanText: buildPlanWithNTasks(2), PlanRunID: first.PlanRunID})
+
+	assert.Equal(t, 1, sr.calls, "a stored fail answers an unchanged plan as a stored pass does")
+	assert.Equal(t, verdict.VerdictFail, second.PlanVerdict)
+	assert.Equal(t, first.PlanFindings, second.PlanFindings)
+	assert.Equal(t, &verdict.PlanReviewScope{Revision: 2, TasksReviewed: 0, TasksCarried: 2}, second.ReviewScope)
+}

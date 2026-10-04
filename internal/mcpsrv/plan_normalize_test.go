@@ -24,7 +24,7 @@ func TestStripTaskUnverifiableFindings_LeavesContradictionsAttached(t *testing.T
 				Criterion: "c2", Evidence: "contradiction-evidence", Suggestion: "s"},
 		},
 	}}}
-	lines := stripTaskUnverifiableFindings(&pr, nil)
+	lines := stripTaskUnverifiableFindings(&pr, nil, parsedTaskIndexes(pr.Tasks, nil))
 
 	require.Len(t, pr.Tasks[0].Findings, 1)
 	assert.Equal(t, verdict.CategoryContradictedCodebaseClaim, pr.Tasks[0].Findings[0].Category,
@@ -58,7 +58,7 @@ func TestStripTaskUnverifiableFindings_LabelsByParsedPositionNotReviewerIndex(t 
 				Criterion: "c", Evidence: "e", Suggestion: "s"},
 		}},
 	}}
-	lines := stripTaskUnverifiableFindings(&pr, tasks)
+	lines := stripTaskUnverifiableFindings(&pr, tasks, parsedTaskIndexes(pr.Tasks, tasks))
 	require.Len(t, lines, 1)
 	assert.Equal(t, "Task 3: e", lines[0], "label must come from the parsed position, not the reviewer's chunk-local task_index")
 }

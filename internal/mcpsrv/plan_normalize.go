@@ -46,12 +46,11 @@ func splitTaskUnverifiable(findings []verdict.Finding) (kept []verdict.Finding, 
 // task_index: validateChunkIdentity checks a chunk's titles and order but not
 // task_index, so a chunk-local index (e.g. the second chunk's first task
 // reporting task_index: 1) survives into the merged response and would
-// mislabel it as Task 1. parsedTaskIndexes resolves each result to the
-// parsed task it actually reports on (by title, falling back to a de-based
-// task_index); the merged-list position (i+1) is used only when that
-// resolution itself fails.
-func stripTaskUnverifiableFindings(pr *verdict.PlanResult, tasks []planparser.RawTask) []string {
-	parsedIdx := parsedTaskIndexes(pr.Tasks, tasks)
+// mislabel it as Task 1. parsedIdx holds, per result, the index of the
+// parsed task it actually reports on (see parsedTaskIndexes, and
+// planRound.planPositions for a round cut short); the merged-list position
+// (i+1) is used only where it holds -1.
+func stripTaskUnverifiableFindings(pr *verdict.PlanResult, tasks []planparser.RawTask, parsedIdx []int) []string {
 	var lines []string
 	for i := range pr.Tasks {
 		idx := parsedIdx[i]

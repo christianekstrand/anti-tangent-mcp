@@ -6,10 +6,13 @@ package mcpsrv
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"sort"
+	"strconv"
 
 	"github.com/patiently/anti-tangent-mcp/internal/config"
 	"github.com/patiently/anti-tangent-mcp/internal/planparser"
@@ -58,27 +61,42 @@ type planInputs struct {
 	ContextFiles     []fileSource
 }
 
-func hashJSON(v any) string {
-	// v holds only strings, ints and slices of those, so Marshal cannot fail.
-	b, _ := json.Marshal(v)
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
+// hashFields hashes fields as the bytes they are, each behind its length, so
+// a field boundary is part of the hash and no byte is rewritten first: a JSON
+// encoding would replace every invalid UTF-8 byte with U+FFFD and give two
+// texts that differ only in such bytes one hash.
+func hashFields(fields ...string) string {
+	h := sha256.New()
+	var size [8]byte
+	for _, f := range fields {
+		binary.BigEndian.PutUint64(size[:], uint64(len(f)))
+		h.Write(size[:])
+		io.WriteString(h, f)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
+// key identifies the inputs by what the reviewer is asked, not by how the
+// caller spelled it: an omitted mode is the thorough review, and the attached
+// files count as a set, whatever order context_paths named them in.
 func (in planInputs) key() string {
-	return hashJSON(struct {
-		Version          string       `json:"version"`
-		ProjectKnowledge string       `json:"project_knowledge"`
-		Mode             string       `json:"mode"`
-		Model            string       `json:"model"`
-		ContextFiles     []fileSource `json:"context_files"`
-	}{"plan-round-v1", in.ProjectKnowledge, in.Mode, in.Model, in.ContextFiles})
+	mode := in.Mode
+	if mode == "" {
+		mode = "thorough"
+	}
+	files := append([]fileSource(nil), in.ContextFiles...)
+	sort.SliceStable(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	fields := []string{"plan-round-v1", in.ProjectKnowledge, mode, in.Model}
+	for _, f := range files {
+		fields = append(fields, f.Path, strconv.Itoa(f.Bytes), f.SHA256)
+	}
+	return hashFields(fields...)
 }
 
 // planTaskHash identifies a task by its heading and its whole body. The
 // heading carries the task's number, so a renumbered task is a changed task.
 func planTaskHash(t planparser.RawTask) string {
-	return hashJSON([]string{t.Title, t.Body})
+	return hashFields(t.Title, t.Body)
 }
 
 // planRound is one validate_plan call placed against the plan run it names.
@@ -117,7 +135,7 @@ func (h *handlers) newPlanRound(planRunID, preamble string, tasks []planparser.R
 	}
 	round := planRound{
 		inputsKey:  inputs.key(),
-		planKey:    hashJSON(struct{ Preamble, Tasks any }{preamble, hashes}),
+		planKey:    hashFields(append([]string{preamble}, hashes...)...),
 		taskHashes: hashes,
 		carried:    make([]*verdict.PlanTaskResult, len(tasks)),
 		changed:    tasks,
@@ -356,6 +374,21 @@ func (r planRound) mergeTasks(reviewed []verdict.PlanTaskResult) []verdict.PlanT
 	return out
 }
 
+// planPositions maps each task result of a round on a known run to its parsed
+// task by the task_index mergeTasks gave it. A round cut short returns a list
+// with gaps, where a result's place in the list is not its task's place in
+// the plan, and two tasks that share a title cannot be told apart by title.
+func (r planRound) planPositions(results []verdict.PlanTaskResult) []int {
+	out := make([]int, len(results))
+	for i, res := range results {
+		out[i] = res.TaskIndex - 1
+		if out[i] < 0 || out[i] >= len(r.carried) {
+			out[i] = -1
+		}
+	}
+	return out
+}
+
 // truncatedRoundResult turns what a round on a known run had when a reviewer
 // call was cut short into the partial result it returns: the carried tasks
 // and the tasks reviewed before the cut. The tasks the round did not reach
@@ -391,12 +424,19 @@ func truncatedRoundResult(partial verdict.PlanResult, round planRound) (verdict.
 	}
 }
 
+// unknownPlanRunIDEchoMax bounds, in runes, how much of an unknown plan_run_id
+// the advisory repeats back.
+const unknownPlanRunIDEchoMax = 64
+
 // unknownPlanRunAdvisory tells a validate_plan caller that the plan_run_id it
 // passed names no run this server holds, so nothing was carried from it and
 // the response belongs to another run, minted for this call or found in the
 // pass cache. It describes the call's arguments, not
 // the plan, so it is added after the verdict is finalized.
 func unknownPlanRunAdvisory(passed, current string) verdict.Finding {
+	// passed is caller text of any length; an id this server mints is far
+	// shorter than the cap.
+	passed = truncate(passed, unknownPlanRunIDEchoMax)
 	return verdict.Finding{
 		Severity:  verdict.SeverityMinor,
 		Category:  verdict.CategoryOther,

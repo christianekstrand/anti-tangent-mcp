@@ -286,7 +286,8 @@ func (c planCallContext) writeRunHeader(run *planrun.Run, pr verdict.PlanResult)
 // settlePlanRun gives a completed review its run and stores review on it: a
 // new run for a call that named none, or the next revision of the run the
 // call named. A named run that expired while its round was being reviewed is
-// replaced by a new one, which the scope then reports as revision 1.
+// replaced by a new one, which the scope then reports as revision 1 and
+// finish reports to the caller as an id that names no live run.
 func (c planCallContext) settlePlanRun(pr *verdict.PlanResult, review *planReview) {
 	if c.Round.RunID != "" {
 		run, ok := c.PlanRuns.Revise(c.Round.RunID, string(pr.PlanVerdict), string(pr.PlanQuality), planRunTasks(*pr, c.Tasks), review)
@@ -344,8 +345,14 @@ func (c planCallContext) finish(pr *verdict.PlanResult) {
 		pr.PlanRunID = c.Round.RunID
 	}
 	c.mintPlanRunID(pr)
-	if c.Round.UnknownRunID != "" {
-		pr.PlanFindings = append(pr.PlanFindings, unknownPlanRunAdvisory(c.Round.UnknownRunID, pr.PlanRunID))
+	unknown := c.Round.UnknownRunID
+	if c.Round.RunID != "" && pr.PlanRunID != c.Round.RunID {
+		// The named run expired while its round was being reviewed, and
+		// settlePlanRun minted another in its place.
+		unknown = c.Round.RunID
+	}
+	if unknown != "" {
+		pr.PlanFindings = append(pr.PlanFindings, unknownPlanRunAdvisory(unknown, pr.PlanRunID))
 	}
 	if len(c.MalformedRulingIDs) > 0 {
 		pr.PlanFindings = append(pr.PlanFindings, malformedPlanRulingsAdvisory(c.MalformedRulingIDs))
@@ -421,7 +428,11 @@ func (h *handlers) handlePlanReviewErr(in planReviewErrInputs) (*mcp.CallToolRes
 		// before the ladder, which derives warn from it.
 		pr.PlanFindings = append(pr.PlanFindings, *unfinished)
 	}
-	finalizePlanVerdict(&pr, call.Tasks)
+	if unfinished != nil {
+		finalizePlanVerdictAt(&pr, call.Tasks, call.Round.planPositions(pr.Tasks))
+	} else {
+		finalizePlanVerdict(&pr, call.Tasks)
+	}
 	call.finish(&pr)
 	r, p, err := planEnvelopeResultFinalized(pr, call.meta())
 	return r, p, true, err

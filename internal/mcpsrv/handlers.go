@@ -2575,6 +2575,8 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 				tasksTotal:      tasksTotal,
 				tasksWithHeader: tasksWithHeader,
 				checklistItems:  len(p.CodebaseReferenceChecklist),
+				// Zero for a call that revises no run: it carries nothing.
+				tasksCarried: round.tasksCarried(),
 			})
 			logOutcome, logVerdict = "truncated", p.PlanVerdict
 		} else {
@@ -2634,11 +2636,12 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 // cachedRunHoldsPlan reports whether a pass-cache entry may answer this call,
 // and sets the entry's review scope for it: the call reviewed nothing and
 // carried every task. An entry is refused when a later round revised its run
-// to a different plan text: the id would then name a plan this call did not
-// send.
+// to a different plan text, or reviewed it under other inputs: the id would
+// then name a review this call did not ask for.
 func (h *handlers) cachedRunHoldsPlan(cached *verdict.PlanResult, round planRound) bool {
 	stored, revision, ok := h.deps.PlanRuns.Review(cached.PlanRunID)
-	if review, _ := stored.(*planReview); ok && review != nil && review.PlanKey != round.planKey {
+	if review, _ := stored.(*planReview); ok && review != nil &&
+		(review.PlanKey != round.planKey || review.InputsKey != round.inputsKey) {
 		return false
 	}
 	cached.ReviewScope = &verdict.PlanReviewScope{
@@ -2983,7 +2986,14 @@ func planEnvelopeResult(pr verdict.PlanResult, meta planSummaryMeta, tasks []pla
 // It must run once per result: a second run finds nothing left to strip and
 // would replace the checklist with an empty one.
 func finalizePlanVerdict(pr *verdict.PlanResult, tasks []planparser.RawTask) {
-	lines := stripTaskUnverifiableFindings(pr, tasks)
+	finalizePlanVerdictAt(pr, tasks, parsedTaskIndexes(pr.Tasks, tasks))
+}
+
+// finalizePlanVerdictAt is finalizePlanVerdict for a caller that already
+// knows which parsed task each result reports on: parsedIdx holds, per
+// result, the task's index in tasks, or -1.
+func finalizePlanVerdictAt(pr *verdict.PlanResult, tasks []planparser.RawTask, parsedIdx []int) {
+	lines := stripTaskUnverifiableFindings(pr, tasks, parsedIdx)
 	calibratePlanVerdictForUnverifiableOnly(pr, len(lines) > 0)
 	verdict.FinalizePlanVerdict(pr)
 	pr.CodebaseReferenceChecklist = lines
