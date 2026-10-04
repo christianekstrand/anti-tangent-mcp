@@ -74,6 +74,10 @@ func stripTaskUnverifiableFindings(pr *verdict.PlanResult, tasks []planparser.Ra
 	return lines
 }
 
+// planPassesNextAction is the server's next_action for a plan with nothing
+// left to fix.
+const planPassesNextAction = "Plan passes: dispatch."
+
 // calibratePlanVerdictForUnverifiableOnly treats a plan whose only findings
 // are minor unverifiable_codebase_claim entries as a checklist rather than a
 // blocker: plan_quality rises to at least actionable, unless the reviewer said
@@ -90,7 +94,7 @@ func calibratePlanVerdictForUnverifiableOnly(pr *verdict.PlanResult, stripped bo
 	if pr.PlanQuality != verdict.PlanQualityRigorous {
 		pr.PlanQuality = verdict.PlanQualityActionable
 	}
-	pr.NextAction = "Plan passes: dispatch."
+	pr.NextAction = planPassesNextAction
 	if stripped {
 		pr.NextAction += " `codebase_reference_checklist` lists references the " +
 			"reviewer could not verify: pre-flight any you have not already checked, or list them in " +

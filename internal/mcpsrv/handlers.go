@@ -2591,6 +2591,7 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 	// verified reference or ladder touches it, so a later round can apply its
 	// own rulings to the tasks it carries.
 	review := round.review(pr, tasks, modelUsed)
+	raw := clonePlanResult(pr)
 	call.applyPreLadder(&pr)
 	// finalizePlanVerdict (not finalizePlanResult) here: it runs the
 	// normalize/calibrate/FinalizePlanVerdict ladder without touching
@@ -2599,6 +2600,7 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 	// stays at the call site rather than inside a planCallContext method
 	// because the cache-hit path must NOT run it; see planCallContext.
 	finalizePlanVerdict(&pr, tasks)
+	pr.NextAction = call.carriedNextAction(pr, raw)
 	pr.ReviewScope = round.scope()
 	// The run is settled BEFORE store, so the cached entry carries the
 	// plan_run_id and a later cache hit reuses this run instead of minting a
@@ -2887,7 +2889,14 @@ func parsedTaskIndexes(results []verdict.PlanTaskResult, tasks []planparser.RawT
 // the body of the parsed task the result reports on (see parsedTaskIndexes).
 // A result that names no parsed task gets no extraction.
 func populateNormativeTestBodies(pr *verdict.PlanResult, tasks []planparser.RawTask) {
-	for i, idx := range parsedTaskIndexes(pr.Tasks, tasks) {
+	populateNormativeTestBodiesAt(pr, tasks, parsedTaskIndexes(pr.Tasks, tasks))
+}
+
+// populateNormativeTestBodiesAt is populateNormativeTestBodies for a caller
+// that already knows which parsed task each result reports on: parsedIdx
+// holds, per result, the task's index in tasks, or -1.
+func populateNormativeTestBodiesAt(pr *verdict.PlanResult, tasks []planparser.RawTask, parsedIdx []int) {
+	for i, idx := range parsedIdx {
 		if idx < 0 {
 			continue
 		}

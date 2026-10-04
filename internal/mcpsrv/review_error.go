@@ -424,6 +424,10 @@ func (h *handlers) handlePlanReviewErr(in planReviewErrInputs) (*mcp.CallToolRes
 	// store(), because a truncated result is never cached. See planCallContext.
 	call.applyPreLadder(&pr)
 	if unfinished != nil {
+		// applyPreLadder resolved each result to a task title-first; a round
+		// cut short has gaps, so a carried task that shares its title with
+		// the task before it took that task's bodies.
+		populateNormativeTestBodiesAt(&pr, call.Tasks, call.Round.planPositions(pr.Tasks))
 		// After the waiver inside applyPreLadder, so no ruling reaches it, and
 		// before the ladder, which derives warn from it.
 		pr.PlanFindings = append(pr.PlanFindings, *unfinished)

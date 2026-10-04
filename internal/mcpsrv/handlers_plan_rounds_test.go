@@ -720,3 +720,79 @@ func TestValidatePlan_AnUnchangedRoundOnAFailingReviewMakesNoReviewerCall(t *tes
 	assert.Equal(t, first.PlanFindings, second.PlanFindings)
 	assert.Equal(t, &verdict.PlanReviewScope{Revision: 2, TasksReviewed: 0, TasksCarried: 2}, second.ReviewScope)
 }
+
+func TestValidatePlan_ARulingOnACarriedPlanLevelFindingReplacesTheStoredNextAction(t *testing.T) {
+	h, sr := roundHandlers(t, 8, roundSingleResp(roundOrder, roundTitles(2)...))
+
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: buildPlanWithNTasks(2)})
+	require.Equal(t, verdict.VerdictWarn, first.PlanVerdict)
+	require.Len(t, first.PlanFindings, 1)
+	require.Equal(t, "round one", first.NextAction)
+
+	second := validatePlanRound(t, h, ValidatePlanArgs{
+		PlanText:  buildPlanWithNTasks(2),
+		PlanRunID: first.PlanRunID,
+		ControllerRulings: []ControllerRulingArg{{
+			FindingID: first.PlanFindings[0].ID, Ruling: "Task 3 does not exist; the order is right",
+		}},
+	})
+
+	assert.Equal(t, 1, sr.calls)
+	assert.Equal(t, verdict.VerdictPass, second.PlanVerdict)
+	assert.Empty(t, second.PlanFindings)
+	require.Len(t, second.WaivedFindings, 1)
+	assert.Equal(t, "Plan passes: dispatch.", second.NextAction,
+		"the stored next_action was written for a finding this round waived")
+}
+
+func TestValidatePlan_ARulingThatLeavesCarriedPlanLevelFindingsSaysTheyWereCarried(t *testing.T) {
+	h, sr := roundHandlers(t, 8, roundSingleResp(roundOrder+","+roundMajor, roundTitles(2)...))
+
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: buildPlanWithNTasks(2)})
+	require.Len(t, first.PlanFindings, 2)
+
+	second := validatePlanRound(t, h, ValidatePlanArgs{
+		PlanText:  buildPlanWithNTasks(2),
+		PlanRunID: first.PlanRunID,
+		ControllerRulings: []ControllerRulingArg{{
+			FindingID: first.PlanFindings[0].ID, Ruling: "Task 3 does not exist; the order is right",
+		}},
+	})
+
+	assert.Equal(t, 1, sr.calls)
+	assert.Equal(t, verdict.VerdictWarn, second.PlanVerdict)
+	require.Len(t, second.PlanFindings, 1)
+	assert.NotEqual(t, "round one", second.NextAction)
+	assert.Contains(t, second.NextAction, "carried from the earlier round")
+	assert.Contains(t, second.NextAction, "plan_run_id")
+}
+
+func TestValidatePlan_ATruncatedRoundGivesACarriedTaskItsOwnNormativeTestBodies(t *testing.T) {
+	task := func(n int, title string) string {
+		return fmt.Sprintf("### Task %d: %s\n\n**Goal:** g%d\n\n**Acceptance criteria:**\n- ac%d\n\n"+
+			"**NORMATIVE TEST BODIES (verbatim):**\n\n```go\nfunc TestTask%d(t *testing.T) {}\n```\n\n", n, title, n, n, n)
+	}
+	plan := "# Plan\n\n" + task(1, "Setup") + task(2, "Add tests") + task(3, "Add tests")
+	h, sr := roundHandlers(t, 8,
+		roundSingleResp("",
+			roundTask{title: "Task 1: Setup"},
+			roundTask{title: "Task 2: Add tests"},
+			roundTask{title: "Task 3: Add tests"}),
+		roundPlanLevelResp("", "n"),
+		providers.Response{RawJSON: []byte(`{"tasks":[`)},
+	)
+	sr.errors = []error{nil, nil, providers.ErrResponseTruncated}
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: plan})
+	require.Len(t, first.Tasks, 3)
+
+	cut := validatePlanRound(t, h, ValidatePlanArgs{
+		PlanText: strings.Replace(plan, "- ac2\n", "- ac2, measured\n", 1), PlanRunID: first.PlanRunID,
+	})
+
+	require.True(t, cut.Partial)
+	require.Len(t, cut.Tasks, 2)
+	require.Equal(t, 3, cut.Tasks[1].TaskIndex)
+	assert.Equal(t, []string{"func TestTask1(t *testing.T) {}"}, cut.Tasks[0].NormativeTestBodies)
+	assert.Equal(t, []string{"func TestTask3(t *testing.T) {}"}, cut.Tasks[1].NormativeTestBodies,
+		"a carried task takes the bodies of the task at its plan position, not of the task that shares its title")
+}
