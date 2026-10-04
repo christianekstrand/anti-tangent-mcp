@@ -62,6 +62,7 @@ func formatEnvelopeSummary(env Envelope) string {
 	writeFindingsSummary(&b, env.Findings, "  ")
 	writeRulingsSummary(&b, env.ControllerRulings, "  ")
 	writeWaivedSummary(&b, env.WaivedFindings, "  ")
+	writeChecklistSummary(&b, env.CodebaseReferenceChecklist)
 	// next_action is reviewer-authored free text (schema: minLength 1, no
 	// other constraint — see internal/verdict/schema.json) rendered LAST in
 	// this block, after every finding. Escaping it matters for the same
@@ -168,6 +169,7 @@ func formatPlanSummary(pr verdict.PlanResult, meta planSummaryMeta) string {
 		}
 		writeWaivedSummary(&b, t.WaivedFindings, "      ")
 	}
+	writeChecklistSummary(&b, pr.CodebaseReferenceChecklist)
 	fmt.Fprintf(&b, "  next_action:   %s\n", escapeBlockValue(pr.NextAction))
 	return b.String()
 }
@@ -263,6 +265,19 @@ func writeWaivedSummary(b *strings.Builder, waived []verdict.WaivedFinding, inde
 			escapeContinuationLines(w.ID, cont), w.Severity, w.Category,
 			escapeContinuationLines(truncate(w.Ruling, waivedRulingSummaryMax), cont))
 		fmt.Fprintf(b, "%s  evidence: %s\n", indent, formatFindingEvidence(w.Evidence, cont))
+	}
+}
+
+// writeChecklistSummary writes the codebase_reference_checklist: a count line
+// and one bullet per entry, or nothing when the checklist is empty. Entries
+// quote reviewer text, so each is truncated and escaped like finding evidence.
+func writeChecklistSummary(b *strings.Builder, checklist []string) {
+	if len(checklist) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "  checklist:     %d unverified codebase reference(s), not findings\n", len(checklist))
+	for _, entry := range checklist {
+		fmt.Fprintf(b, "    - %s\n", formatFindingEvidence(entry, "      "))
 	}
 }
 

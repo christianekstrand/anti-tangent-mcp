@@ -272,6 +272,7 @@ func summaryFormatterCases() []summaryFormatterCase {
 					Escalate:                   true,
 					WaivedFindings:             []verdict.WaivedFinding{seedWaived()},
 					ControllerRulings:          []AppliedRuling{{FindingID: "f_89abcdef", Ruling: "ruling"}},
+					CodebaseReferenceChecklist: []string{"checklist entry"},
 				}
 			},
 			render: func(in any) string { return formatEnvelopeSummary(*in.(*Envelope)) },
@@ -304,9 +305,10 @@ func summaryFormatterCases() []summaryFormatterCase {
 							ExitContracts:         []string{"exit contract"},
 							NormativeTestBodies:   []string{"test body"},
 						}},
-						NextAction:   "next",
-						Partial:      true,
-						SummaryBlock: "summary",
+						NextAction:                 "next",
+						Partial:                    true,
+						SummaryBlock:               "summary",
+						CodebaseReferenceChecklist: []string{"checklist entry"},
 					},
 					Meta: planSummaryMeta{
 						ModelUsed:    "anthropic:model",

@@ -68,32 +68,14 @@ func stripTaskUnverifiableFindings(pr *verdict.PlanResult, tasks []planparser.Ra
 	return lines
 }
 
-// appendCodebaseReferenceChecklist appends the rolled-up checklist finding
-// built from lines, when there are any. It runs after the verdict ladder: a
-// list of references to pre-flight is not a plan defect, and counting it
-// toward the three-minor noise_cluster rule would lift an otherwise passing
-// plan to warn. It is added after the waivers ran, so no ruling waives it.
-func appendCodebaseReferenceChecklist(pr *verdict.PlanResult, lines []string) {
-	if len(lines) == 0 {
-		return
-	}
-	pr.PlanFindings = append(pr.PlanFindings, verdict.Finding{
-		Severity:   verdict.SeverityMinor,
-		Category:   verdict.CategoryUnverifiableCodebaseClaim,
-		Criterion:  "codebase_reference_checklist",
-		Evidence:   strings.Join(lines, "\n"),
-		Suggestion: "Pre-flight these references with grep or codebase-aware review before dispatch. Do not treat this checklist as a plan-quality defect if the references were already verified.",
-	})
-}
-
 // calibratePlanVerdictForUnverifiableOnly treats a plan whose only findings
 // are minor unverifiable_codebase_claim entries as a checklist rather than a
 // blocker: plan_quality rises to at least actionable, unless the reviewer said
 // rigorous, and next_action says so. The checklist is a list of references to
 // pre-flight before dispatch, not work the plan owes. stripped reports whether
 // task-level unverifiable findings were removed for the checklist, which counts
-// as one such finding although it is appended only after the ladder. The ladder
-// that runs next derives the verdict from the findings either way.
+// as one such finding although the checklist is not among the findings. The
+// ladder that runs next derives the verdict from the findings either way.
 func calibratePlanVerdictForUnverifiableOnly(pr *verdict.PlanResult, stripped bool) {
 	if !allPlanFindingsAreMinorUnverifiable(*pr, stripped) {
 		return
@@ -104,7 +86,7 @@ func calibratePlanVerdictForUnverifiableOnly(pr *verdict.PlanResult, stripped bo
 	}
 	pr.NextAction = "Plan passes: dispatch."
 	if stripped {
-		pr.NextAction += " The codebase_reference_checklist finding lists references the " +
+		pr.NextAction += " `codebase_reference_checklist` lists references the " +
 			"reviewer could not verify: pre-flight any you have not already checked, or list them in " +
 			"controller_verified_references on the next call."
 		return

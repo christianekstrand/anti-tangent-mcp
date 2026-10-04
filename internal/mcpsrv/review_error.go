@@ -94,8 +94,8 @@ func (h *handlers) resolveModelAndRender(
 //
 // The verdict ladder (finalizePlanVerdict) is deliberately NOT a method
 // here. The cache-hit path must never re-run it on an already-finalized
-// entry — its checklist is already appended, and a second ladder would count
-// it toward noise_cluster — so the ladder stays at the call sites, which is
+// entry — its unverifiable claims are already moved to the checklist, and a
+// second ladder would empty it — so the ladder stays at the call sites, which is
 // exactly where the three orders differ:
 //
 //	fresh review = applyPreLadder -> ladder -> mintPlanRunID -> store -> finish

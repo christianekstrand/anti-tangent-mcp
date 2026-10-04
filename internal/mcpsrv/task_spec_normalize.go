@@ -6,19 +6,24 @@ import (
 	"github.com/patiently/anti-tangent-mcp/internal/verdict"
 )
 
-func normalizeTaskSpecUnverifiableFindings(findings []verdict.Finding) []verdict.Finding {
-	kept, evidence := splitTaskUnverifiable(findings)
-	if len(evidence) == 0 {
-		return kept
-	}
+// taskSpecChecklistNextAction is appended to validate_task_spec's next_action
+// when the envelope carries a codebase_reference_checklist.
+const taskSpecChecklistNextAction = " `codebase_reference_checklist` lists references the reviewer could not verify: " +
+	"pre-flight any that were not already checked. It is a to-do list, not a defect in the spec."
 
-	return append(kept, verdict.Finding{
-		Severity:   verdict.SeverityMinor,
-		Category:   verdict.CategoryUnverifiableCodebaseClaim,
-		Criterion:  "codebase_reference_checklist",
-		Evidence:   truncate(strings.Join(evidence, "; "), rollupEvidencePerTaskMax),
-		Suggestion: "Pre-flight these references with grep or codebase-aware review before implementation. If they were already verified, treat this as a checklist rather than a spec-quality defect.",
-	})
+// splitTaskSpecChecklist takes every unverifiable_codebase_claim out of a
+// validate_task_spec review's findings. The claims are references for the
+// controller to pre-flight, not defects in the spec, so they are returned as
+// the envelope's checklist, one entry per claim, and never reach the verdict
+// ladder.
+func splitTaskSpecChecklist(findings []verdict.Finding) (kept []verdict.Finding, checklist []string) {
+	kept, evidence := splitTaskUnverifiable(findings)
+	for _, e := range evidence {
+		if e = strings.TrimSpace(e); e != "" {
+			checklist = append(checklist, truncate(e, rollupEvidencePerTaskMax))
+		}
+	}
+	return kept, checklist
 }
 
 // suppressUnverifiableCodebaseClaim drops any unverifiable_codebase_claim

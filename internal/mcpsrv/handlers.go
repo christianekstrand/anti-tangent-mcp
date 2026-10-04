@@ -78,6 +78,11 @@ type Envelope struct {
 	// it, because only implementers call that tool; it is not part of the
 	// summary block, which is what gets pasted into DONE reports.
 	ImplementationGuidance string `json:"implementation_guidance,omitempty"`
+	// CodebaseReferenceChecklist lists the codebase references a
+	// validate_task_spec review could not verify from the spec text, one per
+	// entry. It is a to-do list for the controller, not a list of findings: it
+	// does not count toward Verdict.
+	CodebaseReferenceChecklist []string `json:"codebase_reference_checklist,omitempty"`
 }
 
 // ValidateTaskSpecArgs is the input schema for the pre-hook.
@@ -187,18 +192,20 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 	result := out.Result
 	result.Findings = suppressTestabilityExtractionScopeDrift(result.Findings, inputs.TestabilityExtractions)
 	result.Findings = suppressUnverifiableCodebaseClaim(result.Findings, inputs.ControllerVerifiedReferences)
-	result.Findings = normalizeTaskSpecUnverifiableFindings(result.Findings)
+	var checklist []string
+	result.Findings, checklist = splitTaskSpecChecklist(result.Findings)
 	result.Findings = withServerFindings(cc.Clamp, result.Findings, out.Server)
 	result = verdict.FinalizeVerdict(result)
 
 	env := Envelope{
-		Tool:       "validate_task_spec",
-		Verdict:    string(result.Verdict),
-		Findings:   result.Findings,
-		NextAction: result.NextAction,
-		ModelUsed:  out.ModelUsed,
-		ReviewMS:   out.ReviewMS,
-		Partial:    result.Partial,
+		Tool:                       "validate_task_spec",
+		Verdict:                    string(result.Verdict),
+		Findings:                   result.Findings,
+		NextAction:                 result.NextAction,
+		ModelUsed:                  out.ModelUsed,
+		ReviewMS:                   out.ReviewMS,
+		Partial:                    result.Partial,
+		CodebaseReferenceChecklist: checklist,
 	}
 
 	guidance, err := prompts.LeanGuidance()
@@ -207,6 +214,9 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 	}
 	env.ImplementationGuidance = guidance
 	env.NextAction = strings.TrimRight(env.NextAction, " \t\r\n") + " Read `implementation_guidance` before writing code."
+	if len(checklist) > 0 {
+		env.NextAction += taskSpecChecklistNextAction
+	}
 
 	if f, ok := h.taskSpecPlanRunAdvisory(args.PlanRunID, args.TaskIndex); ok {
 		env.Findings = append(env.Findings, f)
@@ -254,6 +264,8 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 		reviewMS:  env.ReviewMS,
 		partial:   env.Partial,
 		sessionID: env.SessionID,
+
+		checklistItems: len(env.CodebaseReferenceChecklist),
 	})
 	return envelopeResult(env)
 }
@@ -362,6 +374,9 @@ type statParams struct {
 
 	tasksTotal      int
 	tasksWithHeader int
+	// checklistItems is how many codebase_reference_checklist entries the
+	// call returned.
+	checklistItems int
 }
 
 // recordStat maps a statParams into a stats.Event and records it.
@@ -388,6 +403,7 @@ func (h *handlers) recordStat(p statParams) {
 		SessionHash:     h.deps.Stats.HashSession(p.sessionID),
 		TasksTotal:      p.tasksTotal,
 		TasksWithHeader: p.tasksWithHeader,
+		ChecklistItems:  p.checklistItems,
 	})
 }
 
@@ -2415,9 +2431,9 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		// produces — so the entry really can be shared between the two.
 		//
 		// finish() ONLY — no applyPreLadder, and above all no verdict ladder:
-		// the entry was finalized before it was stored, with its checklist
-		// already appended, so re-running the ladder on a cached entry would
-		// count that checklist toward noise_cluster. See
+		// the entry was finalized before it was stored, with its unverifiable
+		// claims already moved to the checklist, so re-running the ladder on a
+		// cached entry would empty that checklist. See
 		// planCallContext for the three call orders and for the two
 		// divergences (no checkFileConsistency, no store) this path keeps on
 		// purpose.
@@ -2439,13 +2455,14 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		// The cache key uses the configured model ref. cachedModelUsed is the
 		// provider-reported model from the original review being reused.
 		h.recordStat(statParams{
-			tool:      "validate_plan",
-			verdict:   string(cached.PlanVerdict),
-			findings:  planFindings(cached),
-			modelUsed: cachedModelUsed,
-			reviewMS:  0,
-			partial:   cached.Partial,
-			cached:    true,
+			tool:           "validate_plan",
+			verdict:        string(cached.PlanVerdict),
+			findings:       planFindings(cached),
+			modelUsed:      cachedModelUsed,
+			reviewMS:       0,
+			partial:        cached.Partial,
+			cached:         true,
+			checklistItems: len(cached.CodebaseReferenceChecklist),
 			// contextBytes, NOT contextPayloadBytes: a cache hit makes no
 			// reviewer call at all, so it sends the attached set zero times.
 			// Multiplying by reviewerCalls() here billed a 3-call chunked
@@ -2522,6 +2539,7 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 				payloadBytes:    planBytes + pkBytes + contextPayloadBytes,
 				tasksTotal:      tasksTotal,
 				tasksWithHeader: tasksWithHeader,
+				checklistItems:  len(p.CodebaseReferenceChecklist),
 			})
 			logOutcome, logVerdict = "truncated", p.PlanVerdict
 		} else {
@@ -2563,6 +2581,7 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		payloadBytes:    planBytes + pkBytes + contextPayloadBytes,
 		tasksTotal:      tasksTotal,
 		tasksWithHeader: tasksWithHeader,
+		checklistItems:  len(pr.CodebaseReferenceChecklist),
 	})
 	logVerdict = pr.PlanVerdict
 	return planEnvelopeResultFinalized(pr, meta)
@@ -2896,13 +2915,16 @@ func planEnvelopeResult(pr verdict.PlanResult, meta planSummaryMeta, tasks []pla
 //     stripped;
 //  3. FinalizePlanVerdict (per-task and plan-level severity ladder,
 //     noise_cluster, ApplyPlanQualitySanity);
-//  4. append the rolled-up checklist, after the ladder, so it never counts
-//     toward noise_cluster.
+//  4. set the checklist field from the stripped lines. It is not a finding,
+//     so the ladder never sees it.
+//
+// It must run once per result: a second run finds nothing left to strip and
+// would replace the checklist with an empty one.
 func finalizePlanVerdict(pr *verdict.PlanResult, tasks []planparser.RawTask) {
 	lines := stripTaskUnverifiableFindings(pr, tasks)
 	calibratePlanVerdictForUnverifiableOnly(pr, len(lines) > 0)
 	verdict.FinalizePlanVerdict(pr)
-	appendCodebaseReferenceChecklist(pr, lines)
+	pr.CodebaseReferenceChecklist = lines
 }
 
 func finalizePlanResult(pr verdict.PlanResult, meta planSummaryMeta, tasks []planparser.RawTask) verdict.PlanResult {

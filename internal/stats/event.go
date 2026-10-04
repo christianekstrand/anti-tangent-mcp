@@ -38,6 +38,11 @@ type Event struct {
 	TasksTotal      int `json:"tasks_total,omitempty"`
 	TasksWithHeader int `json:"tasks_with_header,omitempty"`
 
+	// ChecklistItems is how many codebase_reference_checklist entries a
+	// validate_task_spec or validate_plan call returned. The checklist is not
+	// a finding, so no other field counts it.
+	ChecklistItems int `json:"checklist_items,omitempty"`
+
 	// InputTokens / OutputTokens are set only by the I/O-delegation tools
 	// (bulk_read, code_write). They are what makes "tokens kept out of the
 	// implementer's context" computable. omitempty so no existing event shape

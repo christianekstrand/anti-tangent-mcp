@@ -135,7 +135,7 @@ func TestValidateTaskSpec_RollsUpUnverifiableFindings(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "warn", env.Verdict)
-	require.Len(t, env.Findings, 2)
+	require.Len(t, env.Findings, 1, "the checklist is not a finding")
 
 	assert.Equal(t, verdict.CategoryAmbiguousSpec, env.Findings[0].Category)
 	assert.Equal(t, "AC1", env.Findings[0].Criterion)
@@ -143,13 +143,10 @@ func TestValidateTaskSpec_RollsUpUnverifiableFindings(t *testing.T) {
 	assert.Equal(t, "AC1 has two interpretations", env.Findings[0].Evidence)
 	assert.Equal(t, "clarify AC1", env.Findings[0].Suggestion)
 
-	rolledUp := env.Findings[1]
-	assert.Equal(t, verdict.CategoryUnverifiableCodebaseClaim, rolledUp.Category)
-	assert.Equal(t, verdict.SeverityMinor, rolledUp.Severity)
-	assert.Equal(t, "codebase_reference_checklist", rolledUp.Criterion)
-	assert.Contains(t, rolledUp.Evidence, "internal/example.go defines Foo")
-	assert.Contains(t, rolledUp.Evidence, "docs/example.md documents Bar")
-	assert.Equal(t, "Pre-flight these references with grep or codebase-aware review before implementation. If they were already verified, treat this as a checklist rather than a spec-quality defect.", rolledUp.Suggestion)
+	assert.Equal(t, []string{"internal/example.go defines Foo", "docs/example.md documents Bar"}, env.CodebaseReferenceChecklist)
+	assert.Contains(t, env.NextAction, "`codebase_reference_checklist` lists references the reviewer could not verify")
+	assert.Contains(t, env.SummaryBlock, "  checklist:     2 unverified codebase reference(s), not findings\n")
+	assert.Contains(t, env.SummaryBlock, "    - docs/example.md documents Bar\n")
 
 	sess, ok := d.Sessions.Get(env.SessionID)
 	require.True(t, ok)
@@ -2620,13 +2617,9 @@ func TestValidateTaskSpec_TestabilityExtractionsRollupOrdering(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// scope_drift suppressed; unverifiable rolled up into a single checklist entry.
-	require.Len(t, env.Findings, 1)
-	assert.Equal(t, verdict.CategoryUnverifiableCodebaseClaim, env.Findings[0].Category)
-	assert.Equal(t, "codebase_reference_checklist", env.Findings[0].Criterion)
-	assert.Contains(t, env.Findings[0].Evidence, "internal/example.go defines Foo")
-	// Confirm the suppressed scope_drift evidence is NOT in the rolled-up checklist.
-	assert.NotContains(t, env.Findings[0].Evidence, "buildDeclineWinddownHandlerOutput")
+	// scope_drift suppressed; the unverifiable claim moved to the checklist.
+	assert.Empty(t, env.Findings)
+	assert.Equal(t, []string{"internal/example.go defines Foo"}, env.CodebaseReferenceChecklist)
 }
 
 func TestValidateTaskSpec_TestabilityExtractionsEmptyIsNoop(t *testing.T) {

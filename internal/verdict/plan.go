@@ -65,6 +65,11 @@ type PlanResult struct {
 	// WaivedFindings holds the plan-level findings a controller ruling
 	// covered. Server-set, like PlanRunID.
 	WaivedFindings []WaivedFinding `json:"waived_findings,omitempty"`
+	// CodebaseReferenceChecklist lists, one entry per affected task, the
+	// codebase references the reviewer could not verify. Server-set. It is a
+	// to-do list for the controller, not a list of findings, and does not
+	// count toward PlanVerdict.
+	CodebaseReferenceChecklist []string `json:"codebase_reference_checklist,omitempty"`
 }
 
 // PlanTaskResult is the per-task analysis carried inside PlanResult.Tasks.

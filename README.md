@@ -315,7 +315,7 @@ All six tools accept an optional `max_tokens_override` non-negative int — repl
 
 `validate_plan` scales its default output budget by task count when no `max_tokens_override` is supplied. If reviewer output still truncates before any usable analysis, the response is a `warn` with a `major` truncation finding and retry guidance naming `max_tokens_override`, `ANTI_TANGENT_PLAN_MAX_TOKENS`, and `ANTI_TANGENT_MAX_TOKENS_CEILING`.
 
-Task-level `unverifiable_codebase_claim` findings are rolled into one plan-level checklist. If that checklist is the only remaining finding category, `plan_verdict` is `pass` and `plan_quality` lands at `actionable` (or stays at `rigorous` when the reviewer already emitted that); callers should still pre-flight the references before dispatch.
+Task-level `unverifiable_codebase_claim` findings leave the findings and are returned in the response's `codebase_reference_checklist` field, one entry per affected task (v0.27.0+; earlier versions appended them as one plan-level finding). The checklist is a list of references to pre-flight, not a finding: it does not count toward the verdict or toward `noise_cluster`, and no ruling is needed for it. If those claims are all the reviewer raised, `plan_verdict` is `pass` and `plan_quality` lands at `actionable` (or stays at `rigorous` when the reviewer already emitted that); callers should still pre-flight the references before dispatch.
 
 As of v0.4.0, `validate_plan` task results may include `lightweight_eligible` and `lightweight_reason`. These are advisory controller hints for trivial mechanical tasks that may use the lightweight protocol; they do not change the server-side lifecycle hooks.
 
@@ -332,7 +332,7 @@ In addition to the existing `task_title` / `goal` / `acceptance_criteria` / `non
 - `phase` (optional, v0.3.3+): `pre` (default) or `post`. Use `post` only for post-hoc/session-recovery reviews; normal protocol still calls this at task start.
 - `context_paths` (optional, v0.25.0+): absolute paths to files the implementer was told to work from, such as its dispatch brief. The server reads them and shows the reviewer their contents, so a term or step they define is not reported as missing from the spec.
 
-`validate_task_spec` rolls task-level `unverifiable_codebase_claim` findings into a single `codebase_reference_checklist` finding so implementers get one consistent checklist shape instead of raw text-only-reference findings.
+`validate_task_spec` takes `unverifiable_codebase_claim` findings out of `findings` and returns them in the envelope's `codebase_reference_checklist` field, one entry per claim (v0.27.0+; earlier versions returned them as one minor finding). The checklist does not count as a finding, as a minor on the verdict ladder, or toward `noise_cluster`; `events.jsonl` records its length as `checklist_items`.
 
 ### `validate_completion` arguments
 
