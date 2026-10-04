@@ -110,7 +110,7 @@ type Finding struct {
 	Suggestion string   `json:"suggestion" jsonschema:"The concrete next action that would resolve the finding."`
 	// RepeatOf is server-set on validate_completion: the ID of a prior finding
 	// the implementer answered and the reviewer raised again.
-	RepeatOf string `json:"repeat_of,omitempty" jsonschema:"Server-set: the id of an earlier finding the implementer answered that this finding raises again."`
+	RepeatOf string `json:"repeat_of,omitempty" jsonschema:"Server-set: the id of an earlier finding this finding raises again: one the implementer answered, or a minor finding carried over from the previous validate_completion call. A minor finding that carries it does not count toward the verdict."`
 	// SameAs is the reviewer's claim that this finding raises again one its
 	// prompt showed. The server reads it and clears it before responding.
 	SameAs *string `json:"same_as,omitempty" jsonschema:"Reviewer-set: the id of an earlier finding shown in the prompt that this finding raises again, or null."`

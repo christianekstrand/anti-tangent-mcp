@@ -127,14 +127,55 @@ func waiveRuled(fs []verdict.Finding, taskKey string, rulings map[string]session
 	return kept, waived
 }
 
-// markRepeats sets RepeatOf on every finding that raises again a prior
-// finding this call answered — matched by fingerprint, or by a same_as naming
-// it — and returns the prior IDs its critical and major repeats raise again,
-// each once, in order. It clears same_as on every finding once read.
+// carriedMinors is the previous call's minor findings that a minor finding
+// on this call can raise again. Each is matched once: a fingerprint is only a
+// category and a criterion, and the completion prompt pins some criteria
+// (comment_hygiene, correctness), so two new findings can share a fingerprint
+// with one old one. Matching each old finding once keeps the second from
+// being read as already reported.
+type carriedMinors struct {
+	left []prompts.PriorFinding
+}
+
+// take returns the ID of the prior minor finding f raises again — the one its
+// same_as names, else the first with its fingerprint — and removes it, or
+// returns "" when none is left.
+func (c *carriedMinors) take(f verdict.Finding, shown map[string]bool) string {
+	named, fp, pick := sameAsID(f, shown), fingerprintOf(f), -1
+	for i, p := range c.left {
+		if named != "" && p.ID == named {
+			pick = i
+			break
+		}
+		if pick < 0 && fingerprintOf(p.Finding) == fp {
+			pick = i
+		}
+	}
+	if pick < 0 {
+		return ""
+	}
+	id := c.left[pick].ID
+	c.left = append(c.left[:pick], c.left[pick+1:]...)
+	return id
+}
+
+// markRepeats sets RepeatOf on every finding that raises a prior finding
+// again — matched by a same_as naming it, or by fingerprint — in two cases: a
+// finding of any severity when this call answered the prior one, and a minor
+// finding that raises a prior minor finding, answered or not. The second case
+// is what lets FinalizeVerdict leave a carried-over nit out of the minor
+// count. An unanswered critical or major repeat stays unmarked: it is an open
+// finding, not a dispute. Returns the prior IDs the critical and major repeats
+// raise again, each once, in order, and clears same_as on every finding once
+// read.
 func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[string]bool) []string {
 	answered := map[string]bool{}
 	answeredByFingerprint := map[string]string{}
+	var carried carriedMinors
 	for _, p := range prior {
+		if p.Severity == verdict.SeverityMinor {
+			carried.left = append(carried.left, p)
+		}
 		if p.Response == "" {
 			continue
 		}
@@ -150,6 +191,8 @@ func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[s
 			f.RepeatOf = id
 		} else if id := answeredByFingerprint[fingerprintOf(*f)]; id != "" {
 			f.RepeatOf = id
+		} else if f.Severity == verdict.SeverityMinor {
+			f.RepeatOf = carried.take(*f, shown)
 		}
 		f.SameAs = nil
 		if f.RepeatOf != "" && (f.Severity == verdict.SeverityCritical || f.Severity == verdict.SeverityMajor) {
