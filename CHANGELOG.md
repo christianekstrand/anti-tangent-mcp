@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `correctness` and `test_adequacy` finding categories for the per-task review tools. Neither is severity-floored, and a major one is an open code finding: `next_action` tells the implementer to fix and re-validate.
 - `runs.jsonl` task snapshots carry `categories` (findings per category, summed over the task's `validate_completion` calls) and `lines_added` / `lines_removed` (the size of the latest call's `final_diff`; absent when the call sent no diff). `plan-runs.jsonl` rows carry the same three fields.
 - `scorecard.json` groups report `correctness_escape_rate` (passed tasks in which the review found a critical or major `correctness` problem), `correctness_flag_recall` (of the tasks with such a problem, the share where anti-tangent raised a `correctness` finding on any completion call; matched by task, so an upper bound) and `lines_added_p50`.
+- `record_review_outcome` returns `missing_implementer_models`: the tasks that have a final verdict and that the call named no implementer model for. The outcome is still recorded; the summary block names the tasks so the controller can call again with the full list.
 
 ### Changed
 

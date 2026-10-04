@@ -199,3 +199,18 @@ func TestFixedWarnThatStillEscapedIsNotCaughtAndFixed(t *testing.T) {
 		t.Fatalf("a flagged task the review still found a major problem in is an escape, not a fix: %+v", g)
 	}
 }
+
+func TestTasksWithVerdict(t *testing.T) {
+	lines := []RunLine{
+		taskLine("r1", t0, 3, "pass", completion("m", "pass")),
+		taskLine("r1", t0, 1, "warn", completion("m", "warn")),
+		taskLine("r1", t0, 2, ""),
+	}
+	got := TasksWithVerdict(lines)
+	if len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("TasksWithVerdict = %v, want [1 3]", got)
+	}
+	if got := TasksWithVerdict(nil); got == nil || len(got) != 0 {
+		t.Fatalf("TasksWithVerdict(nil) = %#v, want an empty non-nil slice", got)
+	}
+}
