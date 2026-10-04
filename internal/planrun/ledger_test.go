@@ -497,3 +497,26 @@ func TestLedger_LoadTakesTheLatestRoundsHeader(t *testing.T) {
 	require.Len(t, got.Rows, 1)
 	assert.Equal(t, run.CreatedAt.UTC(), got.CreatedAt.UTC())
 }
+
+func TestLedger_LoadTakesTheLatestRoundsHeaderWhenItIsWrittenFirst(t *testing.T) {
+	dir := t.TempDir()
+	l := &Ledger{Dir: dir}
+	created := time.Date(2026, 9, 22, 9, 0, 0, 0, time.UTC)
+	require.NoError(t, l.AppendHeader(&Run{
+		ID: "pr_order00000002", CreatedAt: created, PlanVerdict: "pass", PlanQuality: "rigorous", TaskCount: 2, Revision: 2,
+		Tasks: []PlanTask{{Index: 1, Title: "Task 1: A"}, {Index: 2, Title: "Task 2: B"}},
+	}))
+	require.NoError(t, l.AppendHeader(&Run{
+		ID: "pr_order00000002", CreatedAt: created, PlanVerdict: "warn", PlanQuality: "actionable", TaskCount: 1, Revision: 1,
+		Tasks: []PlanTask{{Index: 1, Title: "Task 1: A"}},
+	}))
+
+	got, ok := l.Load("pr_order00000002")
+	require.True(t, ok)
+	assert.Equal(t, 2, got.Revision)
+	assert.Equal(t, "pass", got.PlanVerdict)
+	assert.Equal(t, "rigorous", got.PlanQuality)
+	assert.Equal(t, 2, got.TaskCount)
+	require.Len(t, got.Tasks, 2)
+	assert.Equal(t, "Task 2: B", got.Tasks[1].Title)
+}

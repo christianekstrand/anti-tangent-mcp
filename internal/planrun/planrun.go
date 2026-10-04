@@ -186,6 +186,16 @@ func cloneStringMap(m map[string]string) map[string]string {
 	return cp
 }
 
+// cloneTasks copies tasks and each task's Files, so the store's task list
+// shares no backing array with a caller's slice or with a copy it hands out.
+func cloneTasks(tasks []PlanTask) []PlanTask {
+	cp := append([]PlanTask(nil), tasks...)
+	for i := range cp {
+		cp[i].Files = append([]string(nil), cp[i].Files...)
+	}
+	return cp
+}
+
 func cloneCall(c *ToolCall) *ToolCall {
 	if c == nil {
 		return nil
@@ -225,7 +235,7 @@ func (s *Store) CreateWithTasks(planVerdict, planQuality string, tasks []PlanTas
 		PlanVerdict:  planVerdict,
 		PlanQuality:  planQuality,
 		TaskCount:    len(tasks),
-		Tasks:        append([]PlanTask(nil), tasks...),
+		Tasks:        cloneTasks(tasks),
 		Revision:     1,
 		sessions:     map[string]int{},
 	}
@@ -278,7 +288,7 @@ func (s *Store) Revise(runID, planVerdict, planQuality string, tasks []PlanTask,
 	r.PlanVerdict = planVerdict
 	r.PlanQuality = planQuality
 	r.TaskCount = len(tasks)
-	r.Tasks = append([]PlanTask(nil), tasks...)
+	r.Tasks = cloneTasks(tasks)
 	r.Revision++
 	r.review = review
 	r.LastAccessed = time.Now()
@@ -352,7 +362,7 @@ func (s *Store) Snapshot(id string) (*Run, bool) {
 // lock.
 func (r *Run) snapshot() *Run {
 	cp := *r
-	cp.Tasks = append([]PlanTask(nil), r.Tasks...)
+	cp.Tasks = cloneTasks(r.Tasks)
 	cp.sessions = nil
 	cp.review = nil
 	cp.Rows = make([]TaskRow, len(r.Rows))
@@ -435,8 +445,8 @@ func (s *Store) Latest() (*Run, bool) {
 // SoleLiveByTitle returns the id of the server's single live run when title
 // matches exactly one of that run's plan headings. It reports false when no
 // run, or more than one, has been used within the TTL, or the title matches
-// no heading or several: a guess between two runs or two tasks would attach
-// a task to the wrong row. It does not refresh LastAccessed. Safe on a nil
+// no heading or several, or is blank once its "Task N:" prefix is removed: a
+// guess between two runs or two tasks would attach a task to the wrong row. It does not refresh LastAccessed. Safe on a nil
 // Store.
 func (s *Store) SoleLiveByTitle(title string) (string, bool) {
 	if s == nil {
@@ -455,7 +465,9 @@ func (s *Store) SoleLiveByTitle(title string) (string, bool) {
 		}
 		sole = r
 	}
-	if sole == nil || sole.taskByTitle(titleKey(title)) == 0 {
+	// An empty key would match a heading that is itself only "Task N:".
+	key := titleKey(title)
+	if sole == nil || key == "" || sole.taskByTitle(key) == 0 {
 		return "", false
 	}
 	return sole.ID, true

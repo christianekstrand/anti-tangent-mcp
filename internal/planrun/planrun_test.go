@@ -494,6 +494,22 @@ func TestRevise_KeepsTheIDAndRowsAndCountsTheRound(t *testing.T) {
 	_, ok = s.UpdateRow(run.ID, "sess-1", func(row *TaskRow) { row.Checkpoints++ })
 	assert.True(t, ok, "the session attached before the round still reaches its row")
 
+	passed := []PlanTask{{Index: 1, Title: "Task 1: A", Files: []string{"pkg/a.go"}}}
+	revised, ok = s.Revise(run.ID, "pass", "rigorous", passed, "third")
+	require.True(t, ok)
+	passed[0].Files[0] = "caller/changed.go"
+	revised.Tasks[0].Files[0] = "copy/changed.go"
+	snap, ok := s.Snapshot(run.ID)
+	require.True(t, ok)
+	snap.Tasks[0].Files[0] = "snapshot/changed.go"
+	assert.Equal(t, []string{"pkg/a.go"}, s.TaskFiles(run.ID, TaskRef{Index: 1}),
+		"a task's files are shared with neither the caller's slice nor a returned copy")
+
+	created := []PlanTask{{Index: 1, Title: "Task 1: A", Files: []string{"pkg/a.go"}}}
+	minted := s.CreateWithTasks("pass", "rigorous", created)
+	created[0].Files[0] = "caller/changed.go"
+	assert.Equal(t, []string{"pkg/a.go"}, s.TaskFiles(minted.ID, TaskRef{Index: 1}))
+
 	_, ok = s.Revise("pr_unknown", "pass", "rigorous", nil, nil)
 	assert.False(t, ok)
 	_, _, ok = s.Review("pr_unknown")
@@ -529,6 +545,13 @@ func TestSoleLiveByTitle(t *testing.T) {
 	assert.False(t, ok)
 	_, ok = s.SoleLiveByTitle("")
 	assert.False(t, ok)
+
+	blank := NewStore(time.Hour)
+	blank.CreateWithTasks("pass", "rigorous", []PlanTask{{Index: 1, Title: "Task 1:"}, {Index: 2, Title: "Task 2: Store"}})
+	for _, title := range []string{"", "   ", "Task 3:", "task 9 : "} {
+		_, ok = blank.SoleLiveByTitle(title)
+		assert.False(t, ok, "title %q has nothing to match a heading on", title)
+	}
 
 	stale := s.CreateWithTasks("pass", "rigorous", []PlanTask{{Index: 1, Title: "Task 1: Store"}})
 	_, ok = s.SoleLiveByTitle("Store")
