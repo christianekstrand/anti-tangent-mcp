@@ -203,7 +203,7 @@ Ordered by expected effect on the escape rate.
 |---|---|---|
 | 1 | 1 (correctness review); 4 (scorecard inputs); the measurement half of 8 (code size per task) | The only change aimed directly at the escapes, shipped with the measurements needed to judge it. Recording code size now gives Part 2 a before-number. |
 | 2 | 6 (automatic `check_progress`); 2 (non-resolving repeats); the teeth half of 8; 7 (comment guard extensions) | Indirect effect: defects caught mid-task, and reviewer output not spent on findings that cannot resolve. |
-| 3 | 3 (`validate_plan` convergence); 5 (checklist); 8d (CodeScene event channel) | Cost and latency. No expected effect on escapes. |
+| 3 | 3 (`validate_plan` convergence); 5 (checklist); 8d (server-written CodeScene events) | Cost and latency. No expected effect on escapes. |
 
 The parts are built in this order and released together. The scorecard's regression flag therefore
 compares 0.27.0 as a whole with 0.26.0 and cannot separate the parts; each part's own effect is
@@ -424,9 +424,9 @@ from it.
 
 ### 6.3 CodeScene event channel
 
-Either the server appends a record to `codescene-events.jsonl` for each in-band `ran` digest and
-the hook is retired, or the two channels stay and the documentation says an empty file is normal.
-Still open: §9.
+The server appends a record to `codescene-events.jsonl` for every `validate_completion` call whose
+`codescene` argument reports a run, and the operator hook is retired: its example script and the
+setup document say so, because with both in place a run would be counted twice.
 
 ---
 
@@ -466,11 +466,10 @@ The maintainer ruled on the open questions on 2026-10-04:
 7. **Checklist (§6.2).** It moves out of the findings.
 8. **The findings file** is amended to the figures in §2.
 9. **Category enum.** The two categories go into all six reviewer schemas (§4.1).
+10. **CodeScene event channel (§6.3).** The server writes the records; the hook is retired.
 
 Still open:
 
-- **CodeScene event channel (§6.3).** Whether the server writes the records itself or the
-  documentation explains the two channels. It is a Part 3 item and blocks nothing before it.
 - **`check_progress` scope (§5.1).** The design nudges main sessions as well as dispatched
   subagents. The cadence was ruled on; the scope was not, and is taken as designed unless ruled
   otherwise.
