@@ -2534,3 +2534,13 @@ func TestRenderMid_AsksForCorrectnessAndKeepsTheStyleRule(t *testing.T) {
 	assert.Contains(t, out.User, "unfinished, not wrong")
 	assert.NotContains(t, out.User, "test_adequacy", "test adequacy is judged at completion only")
 }
+
+func TestRenderPost_ReportsMandatedOverBuildingUnderItsOwnCriterion(t *testing.T) {
+	out, err := RenderPost(PostInput{Spec: sampleSpec(), Summary: "Implemented the handler.", TestEvidence: "PASS"})
+	require.NoError(t, err)
+	mandated := strings.Index(out.User, "`criterion: over_building_mandated`")
+	own := strings.Index(out.User, "Report every other instance in ONE finding: `category: quality`, `criterion: over_building`")
+	require.NotEqual(t, -1, mandated, "mandated structure needs its own criterion")
+	require.NotEqual(t, -1, own)
+	assert.Less(t, mandated, own)
+}

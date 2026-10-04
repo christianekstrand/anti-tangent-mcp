@@ -319,9 +319,10 @@ type overBuildingReview struct {
 	// priorID is the over_building finding the previous complete review
 	// raised, or "" when it raised none.
 	priorID string
-	// open reports whether this review raises an over_building finding the
-	// implementer is expected to act on. One that names a pre-task finding in
-	// same_as is addressed to the plan author and is not open.
+	// open reports whether this review raises an over_building finding, which
+	// is the implementer's to act on. Structure an acceptance criterion
+	// mandated arrives under its own criterion, addressed to the plan author,
+	// and is not one.
 	open bool
 	// settled reports whether the implementer or the controller has answered
 	// for the structure: a finding_responses answer on this call or an earlier
@@ -330,10 +331,9 @@ type overBuildingReview struct {
 }
 
 // reviewOverBuilding reads the over-building state of one review. reviewer is
-// the reviewer's findings after the ruling waiver; preTaskLinks is, by index
-// into reviewer, the pre-task finding each one's same_as names.
-// answeredBefore is the session's memory of an earlier answer.
-func reviewOverBuilding(reviewer []verdict.Finding, preTaskLinks map[int]string, cr completionReview, answeredBefore bool) overBuildingReview {
+// the reviewer's findings after the ruling waiver. answeredBefore is the
+// session's memory of an earlier answer.
+func reviewOverBuilding(reviewer []verdict.Finding, cr completionReview, answeredBefore bool) overBuildingReview {
 	ob := overBuildingReview{settled: answeredBefore}
 	for _, p := range cr.prior {
 		if !isOverBuilding(p.Category, p.Criterion) {
@@ -347,8 +347,8 @@ func reviewOverBuilding(reviewer []verdict.Finding, preTaskLinks map[int]string,
 	if _, ruled := cr.rulings[fingerprintOf(overBuildingCompanion(""))]; ruled {
 		ob.settled = true
 	}
-	for i, f := range reviewer {
-		if isOverBuilding(f.Category, f.Criterion) && preTaskLinks[i] == "" {
+	for _, f := range reviewer {
+		if isOverBuilding(f.Category, f.Criterion) {
 			ob.open = true
 		}
 	}

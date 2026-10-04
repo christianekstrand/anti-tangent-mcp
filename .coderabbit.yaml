@@ -28,3 +28,11 @@ reviews:
   # CodeRabbit reads this file from the PR HEAD, not from the base branch, so
   # the change takes effect on the PR that introduces it.
   request_changes_workflow: true
+
+  # CodeRabbit's docstring-coverage pre-merge check asks for a doc comment on
+  # most functions a diff touches. This repository's comment policy is the
+  # opposite: a comment is written only for non-obvious behaviour or an
+  # invariant (CLAUDE.md, "Comments"), so the check can only ever warn.
+  pre_merge_checks:
+    docstrings:
+      mode: "off"

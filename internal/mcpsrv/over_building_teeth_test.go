@@ -88,21 +88,44 @@ func TestValidateCompletion_ARulingOnTheCompanionStopsIt(t *testing.T) {
 	assert.Equal(t, "pass", third.Verdict)
 }
 
-func TestValidateCompletion_OverBuildingAddressedToThePlanAuthorDrawsNoCompanion(t *testing.T) {
-	h, rv := newRulingsHandlers(t)
-	sid := startTask(t, h, rv)
+// withPreTaskOverBuilding gives the session a pre-task over_building finding
+// and returns its ID, which is also the ID a completion over_building finding
+// gets: both are the fingerprint of the same category and criterion.
+func withPreTaskOverBuilding(t *testing.T, h *handlers, sid string) string {
+	t.Helper()
 	preID := verdict.Fingerprint(verdict.CategoryQuality, "", "over_building")
 	require.True(t, h.deps.Sessions.SetPreFindings(sid, []verdict.Finding{{
 		ID: preID, Severity: verdict.SeverityMinor, Category: verdict.CategoryQuality, Criterion: "over_building",
 		Evidence: "AC 1 mandates an interface with one implementation.", Suggestion: "Drop it from the AC.",
 	}}))
-	mandated := findingObj("minor", "quality", "over_building", "x.go: yagni: the interface AC 1 mandates", preID)
+	return preID
+}
+
+func TestValidateCompletion_MandatedOverBuildingDrawsNoCompanion(t *testing.T) {
+	h, rv := newRulingsHandlers(t)
+	sid := startTask(t, h, rv)
+	preID := withPreTaskOverBuilding(t, h, sid)
+	mandated := findingObj("minor", "quality", "over_building_mandated", "x.go: yagni: the interface AC 1 mandates", preID)
 
 	completeWith(t, h, rv, completionCallArgs(sid), reviewerFindingsResp(mandated))
 	second := completeWith(t, h, rv, completionCallArgs(sid), reviewerFindingsResp(mandated))
 	assert.Empty(t, findingsOf(second, verdict.CategoryUnaddressed),
-		"a finding the prompt addresses to the plan author asks nothing of the implementer")
+		"structure the plan mandated is addressed to the plan author and asks nothing of the implementer")
 	assert.Equal(t, "pass", second.Verdict)
+}
+
+func TestValidateCompletion_OwnOverBuildingBesideAMandatedOneStillGainsTheCompanion(t *testing.T) {
+	h, rv := newRulingsHandlers(t)
+	sid := startTask(t, h, rv)
+	preID := withPreTaskOverBuilding(t, h, sid)
+	mandated := findingObj("minor", "quality", "over_building_mandated", "x.go: yagni: the interface AC 1 mandates", preID)
+	own := findingObj("minor", "quality", "over_building", "y.go: yagni: a factory nothing asked for", preID)
+
+	completeWith(t, h, rv, completionCallArgs(sid), reviewerFindingsResp(mandated, own))
+	second := completeWith(t, h, rv, completionCallArgs(sid), reviewerFindingsResp(mandated, own))
+	require.Len(t, findingsOf(second, verdict.CategoryUnaddressed), 1,
+		"the implementer's own over-building is theirs to answer, whatever its same_as names")
+	assert.Equal(t, "warn", second.Verdict)
 }
 
 func TestReviewOverBuilding_RuledAndCriterionMatching(t *testing.T) {
