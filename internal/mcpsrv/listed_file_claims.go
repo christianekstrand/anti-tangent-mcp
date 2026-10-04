@@ -12,29 +12,44 @@ import (
 // a control character, which no claim text and no path contains.
 const listedPathMark = "\x00"
 
-// markedAnchor is the pattern for a listed path's stand-in together with a
-// line anchor that followed the path: ":57", ":57-70", ":57,70".
-const markedAnchor = listedPathMark + `(?::\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)?`
+// wordRe matches one word of a claim: a run of letters, digits and
+// underscores that holds at least one letter. Line anchors and other bare
+// numbers are not words.
+var wordRe = regexp.MustCompile(`[0-9_]*[A-Za-z][A-Za-z0-9_]*`)
 
-var (
-	markedAnchorRe = regexp.MustCompile(markedAnchor)
-	// emptiedSpanRe matches a backticked span that held one listed path and
-	// nothing else. Such spans are removed whole: with only their contents
-	// blanked, the closing backtick of one and the opening backtick of the
-	// next would read as a span around the prose between them.
-	emptiedSpanRe = regexp.MustCompile("`\\s*" + markedAnchor + "\\s*`")
-	// codeSpanRe matches a backticked span that still holds something once
-	// the listed paths are gone.
-	codeSpanRe = regexp.MustCompile("`[^`]*[^`\\s][^`]*`")
-	// codeTokenRe matches what reads as a code reference outside backticks: a
-	// dotted name or file name (Foo.Bar, x.go), a path, a call, a snake_case
-	// or a camelCase identifier.
-	codeTokenRe = regexp.MustCompile(`[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+|\w/\w|\w\(|[A-Za-z]\w*_\w+|[a-z]+[A-Z]\w*`)
-	// midSentenceCapitalRe matches a capitalised word that does not open the
-	// claim or a sentence: in a claim about code that is a type or symbol
-	// name (Store, Reviewer) far more often than a proper noun.
-	midSentenceCapitalRe = regexp.MustCompile(`[^\s.!?]\s+[A-Z]\w*`)
+// joinedLabelRe matches a Files: bullet label that names two operations,
+// such as "Create/Modify". It is removed before pathShapedRe looks for a
+// path, since its slash joins two labels, not two path segments.
+var joinedLabelRe = regexp.MustCompile(`(?i)\b(?:create|modify|delete|test)(?:/(?:create|modify|delete|test))+\b`)
+
+// pathShapedRe matches what is left of a path once the listed paths are
+// gone: two segments joined by a slash. A path made only of restatement
+// words, such as new/file, would otherwise pass the word check.
+var pathShapedRe = regexp.MustCompile(`[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+`)
+
+// restatementWords are the words a claim may use, besides the listed paths
+// themselves, and still say nothing but where the task works and that the
+// reviewer could not check it: the Files: bullet labels, the verbs for
+// touching a file, and filler. A word outside this set — a symbol, a verb
+// about what the file does or holds, a name — makes the claim a statement
+// about the codebase, which stays on the checklist.
+var restatementWords = wordSet(
+	"create creates created modify modifies modified delete deletes deleted test tests " +
+		"add adds added edit edits edited update updates updated touch touches touched change changes changed " +
+		"file files path paths line lines section task plan spec text list lists listed new existing " +
+		"exist exists existence present verify verified unverifiable check checked confirm confirmed " +
+		"a an the this that these those it its they their and or nor neither both not no " +
+		"is are be can cannot could will would must should " +
+		"in at of to from for on as with under per by alone also which whether if but",
 )
+
+func wordSet(words string) map[string]bool {
+	set := map[string]bool{}
+	for _, w := range strings.Fields(words) {
+		set[w] = true
+	}
+	return set
+}
 
 // isPathRune reports whether r can be part of a path, so that a listed path
 // found next to one is only a piece of a longer, different path.
@@ -86,10 +101,11 @@ func continuesPath(rest string) bool {
 }
 
 // claimIsOnlyListedPaths reports whether claim, an unverifiable-claim
-// finding's evidence, names at least one of files, whole, and nothing else
-// that reads as a code reference. Such a claim only repeats where the task says it
-// works. A claim that also names a symbol, another path or a convention is
-// still a claim, and anything this cannot tell apart is kept.
+// finding's evidence, names at least one of files, whole, and beyond the
+// listed paths uses only restatementWords. Such a claim only repeats where the
+// task says it works. A claim that says anything else — what a listed file
+// does or holds, a symbol, another path, a convention — is still a claim, and
+// anything this cannot tell apart is kept.
 func claimIsOnlyListedPaths(claim string, files []string) bool {
 	paths := append([]string(nil), files...)
 	// Longest first, so a path that is a prefix of another does not split it.
@@ -108,9 +124,16 @@ func claimIsOnlyListedPaths(claim string, files []string) bool {
 	if !named {
 		return false
 	}
-	rest = emptiedSpanRe.ReplaceAllString(rest, " ")
-	rest = markedAnchorRe.ReplaceAllString(rest, " ")
-	return !codeSpanRe.MatchString(rest) && !codeTokenRe.MatchString(rest) && !midSentenceCapitalRe.MatchString(rest)
+	rest = joinedLabelRe.ReplaceAllString(rest, " ")
+	if pathShapedRe.MatchString(rest) {
+		return false
+	}
+	for _, word := range wordRe.FindAllString(rest, -1) {
+		if !restatementWords[strings.ToLower(word)] {
+			return false
+		}
+	}
+	return true
 }
 
 // dropListedFileClaims removes every unverifiable_codebase_claim finding
