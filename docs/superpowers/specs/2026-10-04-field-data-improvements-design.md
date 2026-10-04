@@ -232,7 +232,8 @@ Baselines are the 0.26.0 numbers in §2.
 `internal/verdict/schema.json`, and `validCategory`. Neither is severity-floored: the reviewer's
 severity stands, as with `attestation_contradiction`. Neither is a submission defect, so
 `blockingCodeFindingIDs` treats a major one as an open code finding and `next_action` already says
-to fix and re-validate. The plan, prime and extract schemas are untouched.
+to fix and re-validate. The plan, prime and extract schemas gain the same two enum entries, because a CI test keeps the six
+reviewer schemas' category enums identical; no prompt for those tools asks for them.
 
 The category enum is shared by the three per-task tools. Only `post.tmpl` asks for the new
 categories in Part 1; a `check_progress` clause is a Part 2 question (§9, question 6).

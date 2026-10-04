@@ -4,7 +4,7 @@
 
 **Goal:** Make `validate_completion` look for correctness and test-adequacy defects, and make the scorecard able to show whether that lowered the escape rate.
 
-**Architecture:** Two reviewer categories (`correctness`, `test_adequacy`) join the per-task schema, and `post.tmpl` gains two sections that ask for them ahead of the comment and over-building checks. Task rows and run snapshots record per-category finding counts and diff size; the `scorecard` package normalises model ids when it builds cohorts, prefers a same-model baseline, and reports two correctness rates. `record_review_outcome` names the tasks it was given no implementer model for.
+**Architecture:** Two reviewer categories (`correctness`, `test_adequacy`) join the reviewer schemas, and `post.tmpl` gains two sections that ask for them ahead of the comment and over-building checks. Task rows and run snapshots record per-category finding counts and diff size; the `scorecard` package normalises model ids when it builds cohorts, prefers a same-model baseline, and reports two correctness rates. `record_review_outcome` names the tasks it was given no implementer model for.
 
 **Tech Stack:** Go 1.25, `text/template` prompts with golden files, stdlib-only `scorecard` package, `github.com/stretchr/testify` in `internal/` tests (plain `testing` in `scorecard/`).
 
@@ -36,18 +36,19 @@
 
 ### Task 1: `correctness` and `test_adequacy` reviewer categories
 
-**Goal:** The per-task reviewer schema and parser accept two new finding categories, with the reviewer's severity preserved.
+**Goal:** The reviewer schemas and the parser accept two new finding categories, with the reviewer's severity preserved.
 
 **Files:**
 - Modify: `internal/verdict/verdict.go`
 - Modify: `internal/verdict/schema.json`
+- Modify: `internal/verdict/plan_schema.json`, `internal/verdict/tasks_only_schema.json`, `internal/verdict/plan_findings_only_schema.json`, `internal/verdict/prime_schema.json`, `internal/verdict/extract_schema.json`
 - Modify: `internal/verdict/parser.go`
 - Modify: `CHANGELOG.md`
 - Test: `internal/verdict/parser_test.go`
 
 **Acceptance Criteria:**
 - [ ] `verdict.Parse` accepts a finding with `"category":"correctness"` and one with `"category":"test_adequacy"`, and returns each with the severity the reviewer gave (`major` stays `major`).
-- [ ] The category enum in `internal/verdict/schema.json` contains `correctness` and `test_adequacy`; `plan_schema.json`, `tasks_only_schema.json`, `plan_findings_only_schema.json`, `prime_schema.json` and `extract_schema.json` are unchanged.
+- [ ] The category enum in all six reviewer schemas (`schema.json`, `plan_schema.json`, `tasks_only_schema.json`, `plan_findings_only_schema.json`, `prime_schema.json`, `extract_schema.json`) contains `correctness` and `test_adequacy`, so `TestReviewerSchemas_CategoryEnumsAreInLockstep` passes unmodified. Only `post.tmpl` asks a reviewer for them (Task 2); the other schemas carry them because the enums are kept identical.
 - [ ] `verdict.Parse` still rejects an unknown category with an error containing `invalid category`.
 - [ ] `CHANGELOG.md` has a `## [0.27.0] - 2026-10-04` heading above `## [0.26.0]` with an `### Added` bullet for the two categories.
 
@@ -86,12 +87,6 @@ func TestSchema_ListsCorrectnessCategories(t *testing.T) {
 	s := string(Schema())
 	require.Contains(t, s, `"correctness"`)
 	require.Contains(t, s, `"test_adequacy"`)
-	for name, other := range map[string][]byte{
-		"plan": PlanSchema(), "tasks_only": TasksOnlySchema(), "plan_findings_only": PlanFindingsOnlySchema(),
-		"prime": PrimeSchema(), "extract": ExtractSchema(),
-	} {
-		require.NotContains(t, string(other), `"test_adequacy"`, "%s schema must not gain the category", name)
-	}
 }
 ```
 
@@ -132,9 +127,9 @@ to
 		CategoryKBGap, CategoryAmbiguousPick, CategoryMissingIndexEntry,
 ```
 
-- [ ] **Step 5: Add them to the per-task schema**
+- [ ] **Step 5: Add them to every reviewer schema**
 
-In `internal/verdict/schema.json`, change
+`internal/verdict/schema_invariants_test.go` (`TestReviewerSchemas_CategoryEnumsAreInLockstep`) requires the category enum to be the same set in all six schemas, so the two entries go into each of them. In `internal/verdict/schema.json`, change
 
 ```json
               "attestation_contradiction",
@@ -150,12 +145,12 @@ to
               "kb_gap",
 ```
 
-Do not edit any other `*_schema.json`.
+Make the same insertion — the two new entries directly after `"attestation_contradiction",`, at that file's own indentation — in `plan_schema.json`, `tasks_only_schema.json`, `plan_findings_only_schema.json`, `prime_schema.json`, `extract_schema.json`. A file with more than one category enum gets the insertion in each.
 
 - [ ] **Step 6: Run the package**
 
 Run: `go test -race ./internal/verdict/...`
-Expected: `ok`. If a schema-invariant test fails, read its message: it checks every schema's `required` list against `properties`, which this change does not alter.
+Expected: `ok`, including `TestReviewerSchemas_CategoryEnumsAreInLockstep`. If it reports a schema that `diverges from canonical set` or is `missing canonical category`, that file's enum did not get both entries.
 
 - [ ] **Step 7: Create the changelog entry**
 
@@ -173,12 +168,12 @@ In `CHANGELOG.md`, insert above `## [0.26.0] - 2026-09-24`:
 - [ ] **Step 8: Commit**
 
 ```bash
-git add internal/verdict/verdict.go internal/verdict/parser.go internal/verdict/schema.json internal/verdict/parser_test.go CHANGELOG.md
+git add internal/verdict/verdict.go internal/verdict/parser.go internal/verdict/*schema.json internal/verdict/parser_test.go CHANGELOG.md
 git commit -m "feat(verdict): correctness and test_adequacy finding categories"
 ```
 
 ```json:metadata
-{"files": ["internal/verdict/verdict.go", "internal/verdict/schema.json", "internal/verdict/parser.go", "internal/verdict/parser_test.go", "CHANGELOG.md"], "verifyCommand": "go test -race ./internal/verdict/...", "acceptanceCriteria": ["Parse accepts correctness and test_adequacy with the reviewer's severity preserved", "schema.json enum lists both; the five other schemas are unchanged", "an unknown category is still rejected with 'invalid category'", "CHANGELOG.md has a [0.27.0] heading with an Added bullet"], "modelTier": "mechanical"}
+{"files": ["internal/verdict/verdict.go", "internal/verdict/schema.json", "internal/verdict/plan_schema.json", "internal/verdict/tasks_only_schema.json", "internal/verdict/plan_findings_only_schema.json", "internal/verdict/prime_schema.json", "internal/verdict/extract_schema.json", "internal/verdict/parser.go", "internal/verdict/parser_test.go", "CHANGELOG.md"], "verifyCommand": "go test -race ./internal/verdict/...", "acceptanceCriteria": ["Parse accepts correctness and test_adequacy with the reviewer's severity preserved", "all six reviewer schemas list both categories and the lockstep test passes unmodified", "an unknown category is still rejected with 'invalid category'", "CHANGELOG.md has a [0.27.0] heading with an Added bullet"], "modelTier": "mechanical"}
 ```
 
 ---
@@ -255,7 +250,7 @@ When the provided evidence addresses every AC and the implementer's narrative is
 
 - [ ] **Step 4: Add the two sections**
 
-In the same file, find the line `### Comment hygiene` and insert the following block immediately above it, leaving one blank line between the block and `### Comment hygiene`:
+In the same file, find the line `### Comment hygiene` and insert the following block immediately above it. The block already ends with one blank line; do not add a second, so exactly one blank line separates it from `### Comment hygiene`:
 
 ```text
 ### Correctness
@@ -341,14 +336,14 @@ git commit -m "feat(prompts): completion review asks for correctness and test ad
 - Modify: `internal/mcpsrv/run_snapshots.go` (`snapshotRow`)
 - Modify: `internal/mcpsrv/handlers.go` (the one `recordCompletionRow` call)
 - Modify: `CHANGELOG.md`
-- Test: `internal/mcpsrv/completion_row_test.go` (create)
+- Test: `internal/mcpsrv/completion_row_test.go` (create), `internal/planrun/clone_row_test.go` (create)
 
 **Acceptance Criteria:**
 - [ ] `planrun.TaskRow` and `scorecard.TaskSnapshot` each have `Categories map[string]int` (`json:"categories,omitempty"`), `LinesAdded int` (`json:"lines_added,omitempty"`) and `LinesRemoved int` (`json:"lines_removed,omitempty"`).
 - [ ] Applying `completionRowUpdate` for two calls to the same row sums `Categories` across the calls, while `LinesAdded` / `LinesRemoved` hold the second call's counts only.
 - [ ] `diffLineCounts` counts lines starting `+` and `-`, does not count a `--- ` line that is immediately followed by a `+++ ` line nor that `+++ ` line, does count a removed line whose content starts with `-- `, and returns `0, 0` for an empty string.
 - [ ] `cloneRow` returns a row whose `Categories` map is a copy: mutating the clone's map leaves the original unchanged.
-- [ ] `snapshotRow` writes the three fields, and a row with no categories and no diff serialises without the three keys.
+- [ ] `snapshotRow` writes the three fields to `runs.jsonl`, and a `TaskSnapshot` with no categories and no diff serialises without the three keys.
 - [ ] `go build ./...` and `cd gnome-topbar/daemon && go build ./...` both succeed.
 
 **Verify:** `go test -race ./internal/mcpsrv/... ./internal/planrun/... ./scorecard/...` → `ok`
@@ -363,12 +358,15 @@ Create `internal/mcpsrv/completion_row_test.go`:
 package mcpsrv
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/patiently/anti-tangent-mcp/internal/planrun"
 	"github.com/patiently/anti-tangent-mcp/internal/verdict"
+	"github.com/patiently/anti-tangent-mcp/scorecard"
 )
 
 func TestDiffLineCounts(t *testing.T) {
@@ -415,12 +413,61 @@ func TestCompletionRowUpdate_NoFindingsNoDiffLeavesFieldsEmpty(t *testing.T) {
 	assert.Zero(t, row.LinesAdded)
 	assert.Zero(t, row.LinesRemoved)
 }
+
+func TestSnapshotRow_CarriesCategoriesAndDiffSize(t *testing.T) {
+	h, rec, _ := outcomeHandlers(t)
+	run := h.deps.PlanRuns.Create("pass", "rigorous", 1)
+	_, ok := h.deps.PlanRuns.Attach(run.ID, "s1", planrun.TaskRef{Index: 1}, "pass")
+	require.True(t, ok)
+	env := Envelope{Verdict: "warn", Findings: []verdict.Finding{
+		{Severity: verdict.SeverityMajor, Category: verdict.CategoryCorrectness, Criterion: "c", Evidence: "e", Suggestion: "s"},
+	}}
+	row, ok := h.deps.PlanRuns.UpdateRow(run.ID, "s1", completionRowUpdate(env, nil, "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"))
+	require.True(t, ok)
+	h.snapshotRow(run.ID, row)
+
+	lines, err := rec.RunLines(rec.RunHash(run.ID))
+	require.NoError(t, err)
+	require.NotEmpty(t, lines)
+	snap := lines[len(lines)-1].Task
+	require.NotNil(t, snap)
+	assert.Equal(t, map[string]int{"correctness": 1}, snap.Categories)
+	assert.Equal(t, 1, snap.LinesAdded)
+	assert.Equal(t, 1, snap.LinesRemoved)
+}
+
+func TestTaskSnapshot_OmitsEmptyCategoriesAndDiffSize(t *testing.T) {
+	raw, err := json.Marshal(scorecard.TaskSnapshot{Index: 1})
+	require.NoError(t, err)
+	for _, key := range []string{"categories", "lines_added", "lines_removed"} {
+		assert.NotContains(t, string(raw), key)
+	}
+}
+```
+
+`outcomeHandlers` is the existing helper in `outcome_handler_test.go` that returns handlers with a stats recorder on a temp directory.
+
+Create `internal/planrun/clone_row_test.go`:
+
+```go
+package planrun
+
+import "testing"
+
+func TestCloneRowCopiesCategories(t *testing.T) {
+	row := TaskRow{Categories: map[string]int{"correctness": 1}}
+	cp := cloneRow(row)
+	cp.Categories["correctness"] = 9
+	if row.Categories["correctness"] != 1 {
+		t.Fatalf("cloneRow aliased Categories: original now %v", row.Categories)
+	}
+}
 ```
 
 - [ ] **Step 2: Run them and see them fail**
 
-Run: `go test ./internal/mcpsrv/... -run 'DiffLineCounts|CompletionRowUpdate'`
-Expected: compile errors: `undefined: diffLineCounts`, too many arguments to `completionRowUpdate`.
+Run: `go test ./internal/mcpsrv/... ./internal/planrun/... -run 'DiffLineCounts|CompletionRowUpdate|SnapshotRow_Carries|TaskSnapshot_Omits|CloneRowCopies'`
+Expected: compile errors: `undefined: diffLineCounts`, too many arguments to `completionRowUpdate`, `unknown field Categories`.
 
 - [ ] **Step 3: Add the row fields**
 
@@ -597,12 +644,12 @@ Under `## [0.27.0]` → `### Added` in `CHANGELOG.md`:
 - [ ] **Step 11: Commit**
 
 ```bash
-git add internal/planrun/planrun.go scorecard/records.go internal/mcpsrv/plan_run_rows.go internal/mcpsrv/run_snapshots.go internal/mcpsrv/handlers.go internal/mcpsrv/completion_row_test.go CHANGELOG.md
+git add internal/planrun/planrun.go internal/planrun/clone_row_test.go scorecard/records.go internal/mcpsrv/plan_run_rows.go internal/mcpsrv/run_snapshots.go internal/mcpsrv/handlers.go internal/mcpsrv/completion_row_test.go CHANGELOG.md
 git commit -m "feat(stats): record finding categories and diff size per task"
 ```
 
 ```json:metadata
-{"files": ["internal/planrun/planrun.go", "scorecard/records.go", "internal/mcpsrv/plan_run_rows.go", "internal/mcpsrv/run_snapshots.go", "internal/mcpsrv/handlers.go", "internal/mcpsrv/completion_row_test.go", "CHANGELOG.md"], "verifyCommand": "go test -race ./internal/mcpsrv/... ./internal/planrun/... ./scorecard/...", "acceptanceCriteria": ["TaskRow and TaskSnapshot have categories, lines_added, lines_removed with omitempty tags", "categories sum across calls; line counts are the latest call's", "diffLineCounts skips real file headers and counts a removed '-- ' line", "cloneRow copies the Categories map", "snapshotRow writes the three fields", "root and daemon modules build"], "modelTier": "standard"}
+{"files": ["internal/planrun/planrun.go", "scorecard/records.go", "internal/mcpsrv/plan_run_rows.go", "internal/mcpsrv/run_snapshots.go", "internal/mcpsrv/handlers.go", "internal/mcpsrv/completion_row_test.go", "internal/planrun/clone_row_test.go", "CHANGELOG.md"], "verifyCommand": "go test -race ./internal/mcpsrv/... ./internal/planrun/... ./scorecard/...", "acceptanceCriteria": ["TaskRow and TaskSnapshot have categories, lines_added, lines_removed with omitempty tags", "categories sum across calls; line counts are the latest call's", "diffLineCounts skips real file headers and counts a removed '-- ' line", "cloneRow copies the Categories map", "snapshotRow writes the three fields", "root and daemon modules build"], "modelTier": "standard"}
 ```
 
 ---
@@ -1044,6 +1091,8 @@ In `metrics()`, add to the `Metrics{...}` literal:
 
 `percentile` returns 0 for an empty slice, which `omitempty` then drops. Reading a nil `Categories` map returns 0, so a record without the field needs no guard.
 
+Then run `gofmt -w scorecard`: the snippets above and the test file's trailing comments are not column-aligned with their neighbours, and `gofmt -l scorecard` must print nothing before the commit.
+
 - [ ] **Step 5: Run the package**
 
 Run: `go test -race ./scorecard/... && (cd gnome-topbar/daemon && go test -race ./...)`
@@ -1262,6 +1311,8 @@ In `formatOutcomeSummary`, after the `for _, e := range res.Escapes { ... }` loo
 
 and add `"strconv"` to the import block. The line carries integers only, so it adds no caller-supplied text to the block and needs no `escapeBlockValue`.
 
+Then run `gofmt -w internal/mcpsrv/outcome_handler.go`: the new result field changes the struct's column alignment, and `gofmt -l internal/mcpsrv` must print nothing before the commit.
+
 - [ ] **Step 5: Run the packages**
 
 Run: `go test -race ./internal/mcpsrv/... ./scorecard/...`
@@ -1406,13 +1457,13 @@ git commit -m "feat(stats): count plan_run_id advisories"
 
 **Acceptance Criteria:**
 - [ ] The README's `#### Scorecard` section names `categories`, `lines_added` / `lines_removed` in the `runs.jsonl` bullet, and `correctness_escape_rate`, `correctness_flag_recall`, `lines_added_p50`, model-id normalisation and the same-model baseline in the `scorecard.json` bullet.
-- [ ] The README's `### validate_completion arguments` section has a paragraph naming the `correctness` and `test_adequacy` categories and stating that either can be critical or major.
+- [ ] The README's ``### `validate_completion` arguments`` section has a paragraph naming the `correctness` and `test_adequacy` categories and stating that either can be critical or major.
 - [ ] `CHANGELOG.md` `## [0.27.0] - 2026-10-04` has, under `### Added`, bullets for: the two categories, the snapshot fields, the scorecard metrics, `missing_implementer_models`, the `plan_run_id` criterion; and under `### Changed`, bullets for: the completion review, model-id normalisation, the baseline choice.
 - [ ] `VERSION` still reads `0.26.0`.
 - [ ] `go build ./... && go test -race ./...` passes at the root, `go test -race ./...` passes in `gnome-topbar/daemon`, every `docs/protocol/*.md` is under 16,000 bytes, `INTEGRATION.md` is under 2,000 bytes and `diff -r docs/protocol plugin/anti-tangent-protocol/protocol` prints nothing.
 - [ ] No file added or changed on the branch contains a comment with a task, issue, PR or version reference, or the words "previously" or "no longer".
 
-**Verify:** `go build ./... && go test -race ./... && (cd gnome-topbar/daemon && go test -race ./...) && diff -r docs/protocol plugin/anti-tangent-protocol/protocol && cat VERSION` → all `ok`, no diff output, `0.26.0`
+**Verify:** `test -z "$(gofmt -l internal scorecard cmd)" && go build ./... && go test -race ./... && (cd gnome-topbar/daemon && go test -race ./...) && diff -r docs/protocol plugin/anti-tangent-protocol/protocol && cat VERSION` → all `ok`, no diff output, `0.26.0`
 
 **Steps:**
 
@@ -1446,7 +1497,7 @@ to
 
 - [ ] **Step 2: README, completion section**
 
-In `README.md`, under `### validate_completion arguments`, add this paragraph directly below the heading, before the line that begins `In addition to`:
+In `README.md`, under the heading ``### `validate_completion` arguments``, add this paragraph directly below the heading, before the line that begins `In addition to`:
 
 ```markdown
 The completion review walks every acceptance criterion and then reads the submitted change for defects of its own: a finding the evidence shows is reported as `correctness`, and a test that would not fail if the behaviour broke as `test_adequacy`. Either can be critical or major and so move the verdict. The reviewer sees only what the call submits, so a diff with little context limits what it can find.
@@ -1473,6 +1524,7 @@ Expected: `clean`. Rewrite any hit so the comment states present behaviour.
 Run:
 
 ```bash
+gofmt -l internal scorecard cmd
 go build ./... && go test -race ./...
 (cd gnome-topbar/daemon && go test -race ./...)
 wc -c docs/protocol/*.md INTEGRATION.md
@@ -1480,7 +1532,7 @@ diff -r docs/protocol plugin/anti-tangent-protocol/protocol
 cat VERSION
 ```
 
-Expected: every package `ok`; each protocol part under 16000 and `INTEGRATION.md` under 2000; no `diff` output; `0.26.0`.
+Expected: `gofmt -l` prints nothing; every package `ok`; each protocol part under 16000 and `INTEGRATION.md` under 2000; no `diff` output; `0.26.0`.
 
 - [ ] **Step 6: Commit**
 
