@@ -31,6 +31,8 @@ func TestClaimIsOnlyListedPaths(t *testing.T) {
 		{"listed path plus a snake_case name", "pkg/store.go reads max_entries", false},
 		{"listed path plus a camelCase name", "pkg/store.go keeps evictOldest", false},
 		{"listed path plus an unlisted path", "pkg/store.go mirrors pkg/cache.go", false},
+		{"listed path plus an unlisted path made of restatement words", "pkg/store.go and new/file", false},
+		{"a two-operation label is not a path", "Create/Modify: `pkg/store.go`", true},
 		{"listed path plus an unlisted file name", "pkg/store.go mirrors cache.go", false},
 		{"a listed name inside a longer file name", "review_store.go holds the switch", false},
 		{"a listed path under another directory", "lib/pkg/store.go holds the switch", false},

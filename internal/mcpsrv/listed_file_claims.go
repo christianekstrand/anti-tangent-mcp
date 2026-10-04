@@ -17,6 +17,16 @@ const listedPathMark = "\x00"
 // numbers are not words.
 var wordRe = regexp.MustCompile(`[0-9_]*[A-Za-z][A-Za-z0-9_]*`)
 
+// joinedLabelRe matches a Files: bullet label that names two operations,
+// such as "Create/Modify". It is removed before pathShapedRe looks for a
+// path, since its slash joins two labels, not two path segments.
+var joinedLabelRe = regexp.MustCompile(`(?i)\b(?:create|modify|delete|test)(?:/(?:create|modify|delete|test))+\b`)
+
+// pathShapedRe matches what is left of a path once the listed paths are
+// gone: two segments joined by a slash. A path made only of restatement
+// words, such as new/file, would otherwise pass the word check.
+var pathShapedRe = regexp.MustCompile(`[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+`)
+
 // restatementWords are the words a claim may use, besides the listed paths
 // themselves, and still say nothing but where the task works and that the
 // reviewer could not check it: the Files: bullet labels, the verbs for
@@ -112,6 +122,10 @@ func claimIsOnlyListedPaths(claim string, files []string) bool {
 		}
 	}
 	if !named {
+		return false
+	}
+	rest = joinedLabelRe.ReplaceAllString(rest, " ")
+	if pathShapedRe.MatchString(rest) {
 		return false
 	}
 	for _, word := range wordRe.FindAllString(rest, -1) {
