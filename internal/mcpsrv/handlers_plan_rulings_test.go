@@ -43,7 +43,8 @@ func TestValidatePlan_ChecklistDoesNotLiftTheVerdict(t *testing.T) {
 	pr, _, _ := runPlanWithArgs(t, raw, ValidatePlanArgs{PlanText: buildPlanWithNTasks(1)})
 
 	assert.Equal(t, verdict.VerdictPass, pr.PlanVerdict)
-	assert.True(t, hasCriterion(pr.PlanFindings, "codebase_reference_checklist"))
+	assert.Equal(t, []string{"Task 1: cites Foo.kt"}, pr.CodebaseReferenceChecklist)
+	assert.Len(t, stripPlanDeprecationFinding(pr.PlanFindings), 2, "the checklist is not a finding")
 	assert.False(t, hasCriterion(pr.PlanFindings, "noise_cluster"))
 }
 
@@ -192,13 +193,13 @@ func TestValidatePlan_VerifiedReferencesSuppressBeforeTheChecklist(t *testing.T)
 		`{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"internal/foo.go defines Bar","suggestion":"verify"}`)
 
 	control, _, _ := runPlanWithArgs(t, raw, ValidatePlanArgs{PlanText: buildPlanWithNTasks(1)})
-	require.True(t, hasCriterion(control.PlanFindings, "codebase_reference_checklist"))
+	require.Len(t, control.CodebaseReferenceChecklist, 1)
 
 	pr, _, _ := runPlanWithArgs(t, raw, ValidatePlanArgs{
 		PlanText:                     buildPlanWithNTasks(1),
 		ControllerVerifiedReferences: []string{"internal/foo.go"},
 	})
-	assert.False(t, hasCriterion(pr.PlanFindings, "codebase_reference_checklist"))
+	assert.Empty(t, pr.CodebaseReferenceChecklist)
 }
 
 func TestValidatePlan_ADemotedContradictionIsSuppressedByAVerifiedReference(t *testing.T) {
@@ -209,7 +210,7 @@ func TestValidatePlan_ADemotedContradictionIsSuppressedByAVerifiedReference(t *t
 		ControllerVerifiedReferences: []string{"internal/foo.go"},
 	})
 	assert.Empty(t, pr.Tasks[0].Findings)
-	assert.False(t, hasCriterion(pr.PlanFindings, "codebase_reference_checklist"))
+	assert.Empty(t, pr.CodebaseReferenceChecklist)
 }
 
 func TestValidatePlan_OnlyAMalformedRulingIDDrawsAnAdvisory(t *testing.T) {
@@ -263,7 +264,7 @@ func TestValidatePlan_TheChecklistCannotBeWaived(t *testing.T) {
 			Ruling:    "stop showing the checklist",
 		}},
 	})
-	assert.True(t, hasCriterion(pr.PlanFindings, "codebase_reference_checklist"))
+	assert.Equal(t, []string{"Task 1: cites Foo.kt"}, pr.CodebaseReferenceChecklist)
 	assert.Empty(t, pr.WaivedFindings)
 }
 

@@ -3,22 +3,40 @@ package mcpsrv
 import (
 	"strings"
 
+	"github.com/patiently/anti-tangent-mcp/internal/planparser"
+	"github.com/patiently/anti-tangent-mcp/internal/planrun"
 	"github.com/patiently/anti-tangent-mcp/internal/verdict"
 )
 
-func normalizeTaskSpecUnverifiableFindings(findings []verdict.Finding) []verdict.Finding {
-	kept, evidence := splitTaskUnverifiable(findings)
-	if len(evidence) == 0 {
-		return kept
+// taskSpecListedFiles returns the paths the task's own Files: section lists:
+// the ones a Files: section in the caller's Context names, and the ones plan
+// run planRunID recorded for the task from the plan.
+func (h *handlers) taskSpecListedFiles(contextText, planRunID string, ref planrun.TaskRef) []string {
+	files := planparser.ListedPaths(contextText)
+	if planRunID == "" {
+		return files
 	}
+	return append(files, h.deps.PlanRuns.TaskFiles(planRunID, ref)...)
+}
 
-	return append(kept, verdict.Finding{
-		Severity:   verdict.SeverityMinor,
-		Category:   verdict.CategoryUnverifiableCodebaseClaim,
-		Criterion:  "codebase_reference_checklist",
-		Evidence:   truncate(strings.Join(evidence, "; "), rollupEvidencePerTaskMax),
-		Suggestion: "Pre-flight these references with grep or codebase-aware review before implementation. If they were already verified, treat this as a checklist rather than a spec-quality defect.",
-	})
+// taskSpecChecklistNextAction is appended to validate_task_spec's next_action
+// when the envelope carries a codebase_reference_checklist.
+const taskSpecChecklistNextAction = " `codebase_reference_checklist` lists references the reviewer could not verify: " +
+	"pre-flight any that were not already checked. It is a to-do list, not a defect in the spec."
+
+// splitTaskSpecChecklist takes every unverifiable_codebase_claim out of a
+// validate_task_spec review's findings. The claims are references for the
+// controller to pre-flight, not defects in the spec, so they are returned as
+// the envelope's checklist, one entry per claim, and never reach the verdict
+// ladder.
+func splitTaskSpecChecklist(findings []verdict.Finding) (kept []verdict.Finding, checklist []string) {
+	kept, evidence := splitTaskUnverifiable(findings)
+	for _, e := range evidence {
+		if e = strings.TrimSpace(e); e != "" {
+			checklist = append(checklist, truncate(e, rollupEvidencePerTaskMax))
+		}
+	}
+	return kept, checklist
 }
 
 // suppressUnverifiableCodebaseClaim drops any unverifiable_codebase_claim

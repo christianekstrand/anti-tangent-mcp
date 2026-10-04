@@ -237,3 +237,19 @@ func TestStore_OverBuildingAnsweredIsSticky(t *testing.T) {
 	st, _ := s.ReviewState(sess.ID)
 	assert.True(t, st.OverBuildingAnswered, "an answer sent once must still stand after later reviews")
 }
+
+func TestStore_CodesceneEventKeyIsReplacedOnlyByANonEmptyKey(t *testing.T) {
+	s := NewStore(time.Hour)
+	sess := s.Create(TaskSpec{Title: "t", Goal: "g"}, "")
+
+	s.ApplyReview(sess.ID, ReviewUpdate{CodesceneEventKey: "aaaa"})
+	s.ApplyReview(sess.ID, ReviewUpdate{})
+	st, ok := s.ReviewState(sess.ID)
+	if !ok || st.CodesceneEventKey != "aaaa" {
+		t.Fatalf("an update without a key must leave the stored one, got %q", st.CodesceneEventKey)
+	}
+	s.ApplyReview(sess.ID, ReviewUpdate{CodesceneEventKey: "bbbb"})
+	if st, _ := s.ReviewState(sess.ID); st.CodesceneEventKey != "bbbb" {
+		t.Fatalf("a new key must replace the stored one, got %q", st.CodesceneEventKey)
+	}
+}

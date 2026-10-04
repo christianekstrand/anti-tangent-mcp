@@ -174,6 +174,11 @@ func (c *planPassCache) expireForTest() {
 func clonePlanResult(pr verdict.PlanResult) verdict.PlanResult {
 	pr.PlanFindings = append([]verdict.Finding(nil), pr.PlanFindings...)
 	pr.WaivedFindings = append([]verdict.WaivedFinding(nil), pr.WaivedFindings...)
+	pr.CodebaseReferenceChecklist = append([]string(nil), pr.CodebaseReferenceChecklist...)
+	if pr.ReviewScope != nil {
+		scope := *pr.ReviewScope
+		pr.ReviewScope = &scope
+	}
 	pr.Tasks = append([]verdict.PlanTaskResult(nil), pr.Tasks...)
 	for i := range pr.Tasks {
 		pr.Tasks[i].Findings = append([]verdict.Finding(nil), pr.Tasks[i].Findings...)

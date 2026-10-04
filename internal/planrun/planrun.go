@@ -84,6 +84,9 @@ type TaskRow struct {
 type PlanTask struct {
 	Index int    `json:"index"`
 	Title string `json:"title"`
+	// Files are the paths the task's own Files: section lists. They are kept
+	// in memory only, so the ledger header never carries them.
+	Files []string `json:"-"`
 }
 
 // TaskRef is what a call says about the plan task it belongs to.
@@ -125,6 +128,13 @@ type Run struct {
 	ConfiguredModels map[string]string `json:"configured_models,omitempty"`
 	ServerVersion    string            `json:"server_version,omitempty"`
 	PlanCall         *ToolCall         `json:"plan_call,omitempty"`
+	// Revision counts the validate_plan rounds that reviewed this run's plan:
+	// 1 when the run is minted, one more for every later round that names it.
+	Revision int `json:"revision,omitempty"`
+	// review is the caller's record of the plan's latest complete review. The
+	// store never looks inside it and hands back the same value, so the caller
+	// must treat a stored value as immutable.
+	review any
 	// sessions maps every session ever attached to a row to that row's Index,
 	// so an implementer that re-validated and carried on with its first
 	// session still updates its task.
@@ -176,6 +186,16 @@ func cloneStringMap(m map[string]string) map[string]string {
 	return cp
 }
 
+// cloneTasks copies tasks and each task's Files, so the store's task list
+// shares no backing array with a caller's slice or with a copy it hands out.
+func cloneTasks(tasks []PlanTask) []PlanTask {
+	cp := append([]PlanTask(nil), tasks...)
+	for i := range cp {
+		cp[i].Files = append([]string(nil), cp[i].Files...)
+	}
+	return cp
+}
+
 func cloneCall(c *ToolCall) *ToolCall {
 	if c == nil {
 		return nil
@@ -215,13 +235,87 @@ func (s *Store) CreateWithTasks(planVerdict, planQuality string, tasks []PlanTas
 		PlanVerdict:  planVerdict,
 		PlanQuality:  planQuality,
 		TaskCount:    len(tasks),
-		Tasks:        append([]PlanTask(nil), tasks...),
+		Tasks:        cloneTasks(tasks),
+		Revision:     1,
 		sessions:     map[string]int{},
 	}
 	s.mu.Lock()
 	s.runs[r.ID] = r
 	s.mu.Unlock()
 	return r
+}
+
+// Review returns the review record last stored on run runID and the run's
+// revision. ok is false when the run is unknown or expired; a known run that
+// has no record yet returns a nil review.
+func (s *Store) Review(runID string) (review any, revision int, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, found := s.runs[runID]
+	if !found {
+		return nil, 0, false
+	}
+	r.LastAccessed = time.Now()
+	return r.review, r.Revision, true
+}
+
+// SetReview stores review on run runID. Returns false when the run is unknown.
+func (s *Store) SetReview(runID string, review any) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return false
+	}
+	r.review = review
+	r.LastAccessed = time.Now()
+	return true
+}
+
+// Revise records a later validate_plan round on run runID under one lock: the
+// run takes the round's verdict, quality, task list and review record, and
+// its revision goes up by one. Rows already attached keep their Index, so a
+// round that renumbers tasks after dispatch leaves them where they were.
+// Returns a copy of the run as this round left it, taken under the same lock,
+// and false when the run is unknown or expired.
+func (s *Store) Revise(runID, planVerdict, planQuality string, tasks []PlanTask, review any) (*Run, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return nil, false
+	}
+	r.PlanVerdict = planVerdict
+	r.PlanQuality = planQuality
+	r.TaskCount = len(tasks)
+	r.Tasks = cloneTasks(tasks)
+	r.Revision++
+	r.review = review
+	r.LastAccessed = time.Now()
+	return r.snapshot(), true
+}
+
+// TaskFiles returns the paths run runID's plan lists for the task ref names,
+// by ref.Index when it is one of the plan's tasks and else by the one heading
+// matching ref.Title. It returns nil when the run is unknown or expired, or
+// ref names no plan task.
+func (s *Store) TaskFiles(runID string, ref TaskRef) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return nil
+	}
+	index := ref.Index
+	if index < 1 || index > len(r.Tasks) {
+		index = r.taskByTitle(titleKey(ref.Title))
+	}
+	for _, t := range r.Tasks {
+		if t.Index == index {
+			return append([]string(nil), t.Files...)
+		}
+	}
+	return nil
 }
 
 // PlanTaskCount returns how many tasks run runID's plan has, and false when
@@ -261,16 +355,23 @@ func (s *Store) Snapshot(id string) (*Run, bool) {
 		return nil, false
 	}
 	r.LastAccessed = time.Now()
+	return r.snapshot(), true
+}
+
+// snapshot returns the copy Snapshot hands out. The caller holds the store's
+// lock.
+func (r *Run) snapshot() *Run {
 	cp := *r
-	cp.Tasks = append([]PlanTask(nil), r.Tasks...)
+	cp.Tasks = cloneTasks(r.Tasks)
 	cp.sessions = nil
+	cp.review = nil
 	cp.Rows = make([]TaskRow, len(r.Rows))
 	for i, row := range r.Rows {
 		cp.Rows[i] = cloneRow(row)
 	}
 	cp.ConfiguredModels = cloneStringMap(r.ConfiguredModels)
 	cp.PlanCall = cloneCall(r.PlanCall)
-	return &cp, true
+	return &cp
 }
 
 // cloneRow deep-copies row: Severity, Categories and Codescene would
@@ -339,6 +440,37 @@ func (s *Store) Latest() (*Run, bool) {
 		}
 	}
 	return latest, latest != nil
+}
+
+// SoleLiveByTitle returns the id of the server's single live run when title
+// matches exactly one of that run's plan headings. It reports false when no
+// run, or more than one, has been used within the TTL, or the title matches
+// no heading or several, or is blank once its "Task N:" prefix is removed: a
+// guess between two runs or two tasks would attach a task to the wrong row. It does not refresh LastAccessed. Safe on a nil
+// Store.
+func (s *Store) SoleLiveByTitle(title string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	var sole *Run
+	for _, r := range s.runs {
+		if now.Sub(r.LastAccessed) > s.ttl {
+			continue
+		}
+		if sole != nil {
+			return "", false
+		}
+		sole = r
+	}
+	// An empty key would match a heading that is itself only "Task N:".
+	key := titleKey(title)
+	if sole == nil || key == "" || sole.taskByTitle(key) == 0 {
+		return "", false
+	}
+	return sole.ID, true
 }
 
 // Attach records a validate_task_spec session against the task ref names

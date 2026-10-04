@@ -37,28 +37,34 @@ func splitTaskUnverifiable(findings []verdict.Finding) (kept []verdict.Finding, 
 // stripTaskUnverifiableFindings removes every task-level
 // unverifiable_codebase_claim finding and returns one checklist line per
 // affected task, with that task's evidence joined by "; " and truncated at
-// rollupEvidencePerTaskMax. Reviewer-emitted plan-level unverifiable findings
-// stay where they are. Each task's Findings is reassigned to a fresh slice.
+// rollupEvidencePerTaskMax. A claim that only names paths the task's own
+// Files: section lists is dropped and reaches no line. Reviewer-emitted
+// plan-level unverifiable findings stay where they are. Each task's Findings
+// is reassigned to a fresh slice.
 //
 // The label numbers by the PARSED plan position, never by the reviewer's own
 // task_index: validateChunkIdentity checks a chunk's titles and order but not
 // task_index, so a chunk-local index (e.g. the second chunk's first task
 // reporting task_index: 1) survives into the merged response and would
-// mislabel it as Task 1. parsedTaskIndexes resolves each result to the
-// parsed task it actually reports on (by title, falling back to a de-based
-// task_index); the merged-list position (i+1) is used only when that
-// resolution itself fails.
-func stripTaskUnverifiableFindings(pr *verdict.PlanResult, tasks []planparser.RawTask) []string {
-	parsedIdx := parsedTaskIndexes(pr.Tasks, tasks)
+// mislabel it as Task 1. parsedIdx holds, per result, the index of the
+// parsed task it actually reports on (see parsedTaskIndexes, and
+// planRound.planPositions for a round cut short); the merged-list position
+// (i+1) is used only where it holds -1.
+func stripTaskUnverifiableFindings(pr *verdict.PlanResult, tasks []planparser.RawTask, parsedIdx []int) []string {
 	var lines []string
 	for i := range pr.Tasks {
-		kept, perTask := splitTaskUnverifiable(pr.Tasks[i].Findings)
+		idx := parsedIdx[i]
+		findings := pr.Tasks[i].Findings
+		if idx >= 0 {
+			findings = dropListedFileClaims(findings, planparser.ListedPaths(tasks[idx].Body))
+		}
+		kept, perTask := splitTaskUnverifiable(findings)
 		pr.Tasks[i].Findings = kept
 		if len(perTask) == 0 {
 			continue
 		}
 		taskNum := i + 1
-		if idx := parsedIdx[i]; idx >= 0 {
+		if idx >= 0 {
 			taskNum = idx + 1
 		}
 		lines = append(lines, fmt.Sprintf("Task %d: %s",
@@ -68,23 +74,9 @@ func stripTaskUnverifiableFindings(pr *verdict.PlanResult, tasks []planparser.Ra
 	return lines
 }
 
-// appendCodebaseReferenceChecklist appends the rolled-up checklist finding
-// built from lines, when there are any. It runs after the verdict ladder: a
-// list of references to pre-flight is not a plan defect, and counting it
-// toward the three-minor noise_cluster rule would lift an otherwise passing
-// plan to warn. It is added after the waivers ran, so no ruling waives it.
-func appendCodebaseReferenceChecklist(pr *verdict.PlanResult, lines []string) {
-	if len(lines) == 0 {
-		return
-	}
-	pr.PlanFindings = append(pr.PlanFindings, verdict.Finding{
-		Severity:   verdict.SeverityMinor,
-		Category:   verdict.CategoryUnverifiableCodebaseClaim,
-		Criterion:  "codebase_reference_checklist",
-		Evidence:   strings.Join(lines, "\n"),
-		Suggestion: "Pre-flight these references with grep or codebase-aware review before dispatch. Do not treat this checklist as a plan-quality defect if the references were already verified.",
-	})
-}
+// planPassesNextAction is the server's next_action for a plan with nothing
+// left to fix.
+const planPassesNextAction = "Plan passes: dispatch."
 
 // calibratePlanVerdictForUnverifiableOnly treats a plan whose only findings
 // are minor unverifiable_codebase_claim entries as a checklist rather than a
@@ -92,8 +84,8 @@ func appendCodebaseReferenceChecklist(pr *verdict.PlanResult, lines []string) {
 // rigorous, and next_action says so. The checklist is a list of references to
 // pre-flight before dispatch, not work the plan owes. stripped reports whether
 // task-level unverifiable findings were removed for the checklist, which counts
-// as one such finding although it is appended only after the ladder. The ladder
-// that runs next derives the verdict from the findings either way.
+// as one such finding although the checklist is not among the findings. The
+// ladder that runs next derives the verdict from the findings either way.
 func calibratePlanVerdictForUnverifiableOnly(pr *verdict.PlanResult, stripped bool) {
 	if !allPlanFindingsAreMinorUnverifiable(*pr, stripped) {
 		return
@@ -102,9 +94,9 @@ func calibratePlanVerdictForUnverifiableOnly(pr *verdict.PlanResult, stripped bo
 	if pr.PlanQuality != verdict.PlanQualityRigorous {
 		pr.PlanQuality = verdict.PlanQualityActionable
 	}
-	pr.NextAction = "Plan passes: dispatch."
+	pr.NextAction = planPassesNextAction
 	if stripped {
-		pr.NextAction += " The codebase_reference_checklist finding lists references the " +
+		pr.NextAction += " `codebase_reference_checklist` lists references the " +
 			"reviewer could not verify: pre-flight any you have not already checked, or list them in " +
 			"controller_verified_references on the next call."
 		return

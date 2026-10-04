@@ -1,0 +1,423 @@
+diff --git a/internal/mcpsrv/checklist_field_test.go b/internal/mcpsrv/checklist_field_test.go
+new file mode 100644
+index 0000000..aa5c44d
+--- /dev/null
++++ b/internal/mcpsrv/checklist_field_test.go
+@@ -0,0 +1,105 @@
++package mcpsrv
++
++import (
++	"context"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/patiently/anti-tangent-mcp/internal/providers"
++	"github.com/patiently/anti-tangent-mcp/internal/session"
++	"github.com/patiently/anti-tangent-mcp/internal/verdict"
++)
++
++func TestSplitTaskSpecChecklist_OneEntryPerClaim(t *testing.T) {
++	claim := func(evidence string) verdict.Finding {
++		return verdict.Finding{Severity: verdict.SeverityMinor, Category: verdict.CategoryUnverifiableCodebaseClaim,
++			Criterion: "spec", Evidence: evidence, Suggestion: "verify"}
++	}
++	other := verdict.Finding{Severity: verdict.SeverityMajor, Category: verdict.CategoryAmbiguousSpec, Criterion: "AC 1"}
++
++	kept, checklist := splitTaskSpecChecklist([]verdict.Finding{claim("  pkg/a.go defines A "), other, claim(""), claim("B has a Close method")})
++	assert.Equal(t, []verdict.Finding{other}, kept)
++	assert.Equal(t, []string{"pkg/a.go defines A", "B has a Close method"}, checklist, "entries are trimmed and an empty claim is dropped")
++
++	kept, checklist = splitTaskSpecChecklist([]verdict.Finding{other})
++	assert.Equal(t, []verdict.Finding{other}, kept)
++	assert.Nil(t, checklist)
++}
++
++// Checklist entries count toward nothing on the verdict ladder: two real
++// minors plus any number of unverifiable claims is still a pass, with no
++// noise_cluster finding.
++func TestValidateTaskSpec_ChecklistDoesNotCountTowardTheVerdict(t *testing.T) {
++	rv := &fakeReviewer{name: "anthropic", resp: providers.Response{
++		RawJSON: []byte(`{
++			"verdict":"warn",
++			"findings":[
++				{"severity":"minor","category":"quality","criterion":"a","evidence":"e","suggestion":"s"},
++				{"severity":"minor","category":"quality","criterion":"b","evidence":"e","suggestion":"s"},
++				{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"pkg/a.go defines A","suggestion":"verify"},
++				{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"B has a Close method","suggestion":"verify"}
++			],
++			"next_action":"go"
++		}`),
++		Model: "claude-sonnet-4-6",
++	}}
++	dir := t.TempDir()
++	h := &handlers{deps: Deps{
++		Cfg:      statsTestConfig(t),
++		Sessions: session.NewStore(statsTestConfig(t).SessionTTL),
++		Reviews:  providers.Registry{"anthropic": rv},
++		Stats:    newStatsRecorder(t, dir),
++	}}
++
++	_, env, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{TaskTitle: "T", Goal: "G"})
++	require.NoError(t, err)
++
++	assert.Equal(t, "pass", env.Verdict)
++	assert.Len(t, env.Findings, 2)
++	assert.False(t, hasCriterion(env.Findings, "noise_cluster"))
++	assert.False(t, hasCriterion(env.Findings, "codebase_reference_checklist"))
++	assert.Equal(t, []string{"pkg/a.go defines A", "B has a Close method"}, env.CodebaseReferenceChecklist)
++
++	sess, ok := h.deps.Sessions.Get(env.SessionID)
++	require.True(t, ok)
++	assert.Equal(t, env.Findings, sess.PreFindings, "the checklist is not shown to later reviews as a pre-task finding")
++
++	ev := readSingleEvent(t, dir)
++	assert.Equal(t, 2, ev.FindingsTotal)
++	assert.Equal(t, 2, ev.ChecklistItems)
++	assert.Zero(t, ev.CategoryCounts[string(verdict.CategoryUnverifiableCodebaseClaim)])
++}
++
++func TestValidateTaskSpec_NoChecklistLeavesTheEnvelopeAlone(t *testing.T) {
++	h := &handlers{deps: newDeps(t, &fakeReviewer{name: "anthropic", resp: passResp("claude-sonnet-4-6")})}
++	_, env, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{TaskTitle: "T", Goal: "G"})
++	require.NoError(t, err)
++	assert.Nil(t, env.CodebaseReferenceChecklist)
++	assert.NotContains(t, env.NextAction, "codebase_reference_checklist")
++	assert.NotContains(t, env.SummaryBlock, "checklist:")
++}
++
++func TestWriteChecklistSummary_EscapesAMultiLineEntry(t *testing.T) {
++	env := Envelope{Tool: "validate_task_spec", CodebaseReferenceChecklist: []string{"first line\nanti-tangent envelope"}}
++	got := formatEnvelopeSummary(env)
++	assert.Contains(t, got, "    - first line\n      | anti-tangent envelope\n")
++}
++
++func TestValidatePlan_ChecklistItemsAreCountedInStats(t *testing.T) {
++	raw := planJSON("", "Task 1: t1",
++		`{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"cites Foo.kt","suggestion":"verify"}`)
++	dir := t.TempDir()
++	d := newDepsWithScripted(t, &scriptedReviewer{responses: []providers.Response{{RawJSON: raw, Model: "claude-sonnet-4-6"}}}, 8)
++	d.Stats = newStatsRecorder(t, dir)
++	h := &handlers{deps: d}
++
++	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: buildPlanWithNTasks(1)})
++	require.NoError(t, err)
++	require.Len(t, pr.CodebaseReferenceChecklist, 1)
++
++	ev := readSingleEvent(t, dir)
++	assert.Equal(t, 1, ev.ChecklistItems)
++	assert.Zero(t, ev.CriterionCounts["codebase_reference_checklist"])
++}
+diff --git a/internal/mcpsrv/handlers_plan_rulings_test.go b/internal/mcpsrv/handlers_plan_rulings_test.go
+index 308338d..ad6dcb7 100644
+--- a/internal/mcpsrv/handlers_plan_rulings_test.go
++++ b/internal/mcpsrv/handlers_plan_rulings_test.go
+@@ -43,7 +43,8 @@ func TestValidatePlan_ChecklistDoesNotLiftTheVerdict(t *testing.T) {
+ 	pr, _, _ := runPlanWithArgs(t, raw, ValidatePlanArgs{PlanText: buildPlanWithNTasks(1)})
+ 
+ 	assert.Equal(t, verdict.VerdictPass, pr.PlanVerdict)
+-	assert.True(t, hasCriterion(pr.PlanFindings, "codebase_reference_checklist"))
++	assert.Equal(t, []string{"Task 1: cites Foo.kt"}, pr.CodebaseReferenceChecklist)
++	assert.Len(t, stripPlanDeprecationFinding(pr.PlanFindings), 2, "the checklist is not a finding")
+ 	assert.False(t, hasCriterion(pr.PlanFindings, "noise_cluster"))
+ }
+ 
+@@ -192,13 +193,13 @@ func TestValidatePlan_VerifiedReferencesSuppressBeforeTheChecklist(t *testing.T)
+ 		`{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"internal/foo.go defines Bar","suggestion":"verify"}`)
+ 
+ 	control, _, _ := runPlanWithArgs(t, raw, ValidatePlanArgs{PlanText: buildPlanWithNTasks(1)})
+-	require.True(t, hasCriterion(control.PlanFindings, "codebase_reference_checklist"))
++	require.Len(t, control.CodebaseReferenceChecklist, 1)
+ 
+ 	pr, _, _ := runPlanWithArgs(t, raw, ValidatePlanArgs{
+ 		PlanText:                     buildPlanWithNTasks(1),
+ 		ControllerVerifiedReferences: []string{"internal/foo.go"},
+ 	})
+-	assert.False(t, hasCriterion(pr.PlanFindings, "codebase_reference_checklist"))
++	assert.Empty(t, pr.CodebaseReferenceChecklist)
+ }
+ 
+ func TestValidatePlan_ADemotedContradictionIsSuppressedByAVerifiedReference(t *testing.T) {
+@@ -209,7 +210,7 @@ func TestValidatePlan_ADemotedContradictionIsSuppressedByAVerifiedReference(t *t
+ 		ControllerVerifiedReferences: []string{"internal/foo.go"},
+ 	})
+ 	assert.Empty(t, pr.Tasks[0].Findings)
+-	assert.False(t, hasCriterion(pr.PlanFindings, "codebase_reference_checklist"))
++	assert.Empty(t, pr.CodebaseReferenceChecklist)
+ }
+ 
+ func TestValidatePlan_OnlyAMalformedRulingIDDrawsAnAdvisory(t *testing.T) {
+@@ -263,7 +264,7 @@ func TestValidatePlan_TheChecklistCannotBeWaived(t *testing.T) {
+ 			Ruling:    "stop showing the checklist",
+ 		}},
+ 	})
+-	assert.True(t, hasCriterion(pr.PlanFindings, "codebase_reference_checklist"))
++	assert.Equal(t, []string{"Task 1: cites Foo.kt"}, pr.CodebaseReferenceChecklist)
+ 	assert.Empty(t, pr.WaivedFindings)
+ }
+ 
+diff --git a/internal/mcpsrv/handlers_plan_test.go b/internal/mcpsrv/handlers_plan_test.go
+index d86c8b3..b9b8075 100644
+--- a/internal/mcpsrv/handlers_plan_test.go
++++ b/internal/mcpsrv/handlers_plan_test.go
+@@ -825,13 +825,13 @@ func TestValidatePlan_RollsUpTaskUnverifiableFindings(t *testing.T) {
+ 	}`)
+ 	pr, err := runValidatePlanWithReviewerJSON(t, raw, 2)
+ 	require.NoError(t, err)
+-	require.Len(t, pr.PlanFindings, 1)
+-	assert.Equal(t, verdict.CategoryUnverifiableCodebaseClaim, pr.PlanFindings[0].Category)
+-	assert.Equal(t, "codebase_reference_checklist", pr.PlanFindings[0].Criterion)
+-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Task 1")
+-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Foo.kt:10")
+-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Task 2")
+-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Baz.qux")
++	assert.Empty(t, pr.PlanFindings, "the checklist is not a finding")
++	assert.Equal(t, []string{
++		"Task 1: Task 1 cites Foo.kt:10 and Foo.bar",
++		"Task 2: Task 2 cites Baz.qux",
++	}, pr.CodebaseReferenceChecklist)
++	assert.Contains(t, pr.SummaryBlock, "  checklist:     2 unverified codebase reference(s), not findings\n")
++	assert.Contains(t, pr.SummaryBlock, "    - Task 2: Task 2 cites Baz.qux\n")
+ 	assert.Empty(t, pr.Tasks[0].Findings)
+ 	assert.Empty(t, pr.Tasks[1].Findings)
+ }
+@@ -882,10 +882,11 @@ func TestValidatePlan_MixedFindings_PlanLevelDerivesPassTaskLevelDerivesWarn(t *
+ 	require.Len(t, pr.Tasks[0].Findings, 1)
+ 	assert.Equal(t, verdict.CategoryAmbiguousSpec, pr.Tasks[0].Findings[0].Category)
+ 	assert.Equal(t, verdict.VerdictWarn, pr.Tasks[0].Verdict, "task ladder derives warn from one major finding")
+-	// Plan-level: the rolled-up codebase_reference_checklist (1 minor) drives
+-	// the ladder to pass. Plan-level verdict is derived from PlanFindings only;
+-	// task-level severity does NOT propagate up to the plan verdict.
+-	assert.Equal(t, verdict.VerdictPass, pr.PlanVerdict, "plan ladder derives pass from one minor plan-level finding")
++	// Plan-level: the unverifiable claim moved to the checklist, which is not
++	// a finding, so the plan has none. Plan-level verdict is derived from
++	// PlanFindings only; task-level severity does NOT propagate up to it.
++	assert.Equal(t, verdict.VerdictPass, pr.PlanVerdict, "plan ladder derives pass from no plan-level finding")
++	assert.Len(t, pr.CodebaseReferenceChecklist, 1)
+ }
+ 
+ func TestValidatePlan_PreservesPlanLevelUnverifiableBesideTaskRollup(t *testing.T) {
+@@ -898,10 +899,9 @@ func TestValidatePlan_PreservesPlanLevelUnverifiableBesideTaskRollup(t *testing.
+ 	}`)
+ 	pr, err := runValidatePlanWithReviewerJSON(t, raw, 1)
+ 	require.NoError(t, err)
+-	require.Len(t, pr.PlanFindings, 2)
++	require.Len(t, pr.PlanFindings, 1)
+ 	assert.Equal(t, "plan", pr.PlanFindings[0].Criterion)
+-	assert.Equal(t, "codebase_reference_checklist", pr.PlanFindings[1].Criterion)
+-	assert.Contains(t, pr.PlanFindings[1].Evidence, "Task 1")
++	assert.Equal(t, []string{"Task 1: Task 1 cites Foo.kt"}, pr.CodebaseReferenceChecklist)
+ }
+ 
+ func TestValidatePlan_ChunkedUnverifiableFindingsRollUp(t *testing.T) {
+@@ -947,10 +947,8 @@ func TestValidatePlan_ChunkedUnverifiableFindingsRollUp(t *testing.T) {
+ 	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: buildPlanWithNTasks(9)})
+ 	require.NoError(t, err)
+ 	pr.PlanFindings = stripPlanDeprecationFinding(pr.PlanFindings)
+-	require.Len(t, pr.PlanFindings, 1)
+-	assert.Equal(t, "codebase_reference_checklist", pr.PlanFindings[0].Criterion)
+-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Task 1")
+-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Task 9")
++	assert.Empty(t, pr.PlanFindings)
++	assert.Equal(t, []string{"Task 1: Task 1 cites Foo.kt", "Task 9: Task 9 cites Baz.kt"}, pr.CodebaseReferenceChecklist)
+ }
+ 
+ // TestValidatePlan_MultipleUnverifiableUnderSameTaskJoinedWithSemicolon
+@@ -973,9 +971,7 @@ func TestValidatePlan_MultipleUnverifiableUnderSameTaskJoinedWithSemicolon(t *te
+ 	}`)
+ 	pr, err := runValidatePlanWithReviewerJSON(t, raw, 1)
+ 	require.NoError(t, err)
+-	require.Len(t, pr.PlanFindings, 1)
+-	assert.Equal(t, 1, strings.Count(pr.PlanFindings[0].Evidence, "Task 1:"))
+-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Foo.kt:10; Bar.kt:20")
++	assert.Equal(t, []string{"Task 1: Foo.kt:10; Bar.kt:20"}, pr.CodebaseReferenceChecklist)
+ }
+ 
+ // TestValidatePlan_EmptyFindings_LadderDerivesPass locks in the
+@@ -1017,14 +1013,8 @@ func TestValidatePlan_RollupFallsBackToMergedPositionForBadTaskIndex(t *testing.
+ 	}`)
+ 	pr, err := runValidatePlanWithReviewerJSON(t, raw, 2)
+ 	require.NoError(t, err)
+-	require.Len(t, pr.PlanFindings, 1)
+-	// Without the fallback the rollup would emit "Task 0:" and "Task 1:".
+-	// With the fallback the first task lands at merged-position 1 and the
+-	// second keeps its reviewer-provided index of 1 — but the fallback only
+-	// fires on the first (TaskIndex == 0). Either way, no "Task 0:" appears
+-	// and merged-position 1 is referenced at least once.
+-	assert.NotContains(t, pr.PlanFindings[0].Evidence, "Task 0:")
+-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Task 1:")
++	// A reviewer's 0-based task_index must not label an entry "Task 0:".
++	assert.Equal(t, []string{"Task 1: Foo.kt", "Task 2: Bar.kt"}, pr.CodebaseReferenceChecklist)
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -2142,7 +2132,7 @@ func TestValidatePlan_ContradictionWithoutAttachmentsIsDemoted(t *testing.T) {
+ 		all = append(all, tk.Findings...)
+ 	}
+ 	var contradictions, demoted int
+-	var planLevel, checklist verdict.Finding
++	var planLevel verdict.Finding
+ 	for _, f := range all {
+ 		switch f.Category {
+ 		case verdict.CategoryContradictedCodebaseClaim:
+@@ -2151,16 +2141,12 @@ func TestValidatePlan_ContradictionWithoutAttachmentsIsDemoted(t *testing.T) {
+ 			demoted++
+ 			assert.Equal(t, verdict.SeverityMinor, f.Severity,
+ 				"a demoted contradiction must land on the unverifiable floor")
+-			if f.Criterion == "codebase_reference_checklist" {
+-				checklist = f
+-			} else {
+-				planLevel = f
+-			}
++			planLevel = f
+ 		}
+ 	}
+ 	assert.Zero(t, contradictions,
+ 		"no contradicted_codebase_claim may survive a call with no context_paths")
+-	assert.Equal(t, 2, demoted, "both the plan-level and the per-task finding must be demoted")
++	assert.Equal(t, 1, demoted, "the plan-level finding must be demoted and stay a finding")
+ 
+ 	// Demotion is a rewrite of category+severity, NOT a redaction: the
+ 	// observation is still worth surfacing. Asserting category and severity
+@@ -2171,14 +2157,11 @@ func TestValidatePlan_ContradictionWithoutAttachmentsIsDemoted(t *testing.T) {
+ 	assert.Equal(t, "e", planLevel.Evidence, "the reviewer's evidence must survive demotion")
+ 	assert.Equal(t, "s", planLevel.Suggestion, "the reviewer's suggestion must survive demotion")
+ 
+-	// The per-task twin is rolled up into the plan-level
+-	// codebase_reference_checklist (stripTaskUnverifiableFindings), which
+-	// supplies its own criterion and suggestion — but the reviewer's evidence
+-	// text must still reach the human there, verbatim, under its task number.
+-	require.Equal(t, "codebase_reference_checklist", checklist.Criterion,
+-		"the demoted per-task finding must roll up, not vanish")
+-	assert.Equal(t, "Task 1: e", checklist.Evidence,
+-		"the rolled-up entry must carry the reviewer's own evidence text")
++	// The per-task twin moves to codebase_reference_checklist
++	// (stripTaskUnverifiableFindings): the reviewer's evidence text must still
++	// reach the human there, verbatim, under its task number.
++	assert.Equal(t, []string{"Task 1: e"}, pr.CodebaseReferenceChecklist,
++		"the demoted per-task finding must reach the checklist, not vanish")
+ }
+ 
+ // The gap between the two tests above: the demotion used to be gated on
+@@ -2218,7 +2201,8 @@ func TestValidatePlan_ContradictionAboutUnattachedFileIsDemotedDespiteAttachment
+ 	}
+ 	assert.Zero(t, contradictions,
+ 		"a contradiction naming none of the attached files must not survive just because something else was attached")
+-	assert.Equal(t, 2, demoted, "both the plan-level and the per-task finding must be demoted")
++	assert.Equal(t, 1, demoted, "the plan-level finding must be demoted and stay a finding")
++	assert.Len(t, pr.CodebaseReferenceChecklist, 1, "the demoted per-task finding must reach the checklist")
+ }
+ 
+ // The fail-open half of the same rule. The ground rules ask the reviewer to
+diff --git a/internal/mcpsrv/handlers_test.go b/internal/mcpsrv/handlers_test.go
+index 7ae16a0..906e540 100644
+--- a/internal/mcpsrv/handlers_test.go
++++ b/internal/mcpsrv/handlers_test.go
+@@ -135,7 +135,7 @@ func TestValidateTaskSpec_RollsUpUnverifiableFindings(t *testing.T) {
+ 	})
+ 	require.NoError(t, err)
+ 	assert.Equal(t, "warn", env.Verdict)
+-	require.Len(t, env.Findings, 2)
++	require.Len(t, env.Findings, 1, "the checklist is not a finding")
+ 
+ 	assert.Equal(t, verdict.CategoryAmbiguousSpec, env.Findings[0].Category)
+ 	assert.Equal(t, "AC1", env.Findings[0].Criterion)
+@@ -143,13 +143,10 @@ func TestValidateTaskSpec_RollsUpUnverifiableFindings(t *testing.T) {
+ 	assert.Equal(t, "AC1 has two interpretations", env.Findings[0].Evidence)
+ 	assert.Equal(t, "clarify AC1", env.Findings[0].Suggestion)
+ 
+-	rolledUp := env.Findings[1]
+-	assert.Equal(t, verdict.CategoryUnverifiableCodebaseClaim, rolledUp.Category)
+-	assert.Equal(t, verdict.SeverityMinor, rolledUp.Severity)
+-	assert.Equal(t, "codebase_reference_checklist", rolledUp.Criterion)
+-	assert.Contains(t, rolledUp.Evidence, "internal/example.go defines Foo")
+-	assert.Contains(t, rolledUp.Evidence, "docs/example.md documents Bar")
+-	assert.Equal(t, "Pre-flight these references with grep or codebase-aware review before implementation. If they were already verified, treat this as a checklist rather than a spec-quality defect.", rolledUp.Suggestion)
++	assert.Equal(t, []string{"internal/example.go defines Foo", "docs/example.md documents Bar"}, env.CodebaseReferenceChecklist)
++	assert.Contains(t, env.NextAction, "`codebase_reference_checklist` lists references the reviewer could not verify")
++	assert.Contains(t, env.SummaryBlock, "  checklist:     2 unverified codebase reference(s), not findings\n")
++	assert.Contains(t, env.SummaryBlock, "    - docs/example.md documents Bar\n")
+ 
+ 	sess, ok := d.Sessions.Get(env.SessionID)
+ 	require.True(t, ok)
+@@ -2620,13 +2617,9 @@ func TestValidateTaskSpec_TestabilityExtractionsRollupOrdering(t *testing.T) {
+ 	})
+ 	require.NoError(t, err)
+ 
+-	// scope_drift suppressed; unverifiable rolled up into a single checklist entry.
+-	require.Len(t, env.Findings, 1)
+-	assert.Equal(t, verdict.CategoryUnverifiableCodebaseClaim, env.Findings[0].Category)
+-	assert.Equal(t, "codebase_reference_checklist", env.Findings[0].Criterion)
+-	assert.Contains(t, env.Findings[0].Evidence, "internal/example.go defines Foo")
+-	// Confirm the suppressed scope_drift evidence is NOT in the rolled-up checklist.
+-	assert.NotContains(t, env.Findings[0].Evidence, "buildDeclineWinddownHandlerOutput")
++	// scope_drift suppressed; the unverifiable claim moved to the checklist.
++	assert.Empty(t, env.Findings)
++	assert.Equal(t, []string{"internal/example.go defines Foo"}, env.CodebaseReferenceChecklist)
+ }
+ 
+ func TestValidateTaskSpec_TestabilityExtractionsEmptyIsNoop(t *testing.T) {
+diff --git a/internal/mcpsrv/plan_normalize_test.go b/internal/mcpsrv/plan_normalize_test.go
+index 6ae206e..98edc60 100644
+--- a/internal/mcpsrv/plan_normalize_test.go
++++ b/internal/mcpsrv/plan_normalize_test.go
+@@ -24,16 +24,16 @@ func TestStripTaskUnverifiableFindings_LeavesContradictionsAttached(t *testing.T
+ 				Criterion: "c2", Evidence: "contradiction-evidence", Suggestion: "s"},
+ 		},
+ 	}}}
+-	appendCodebaseReferenceChecklist(&pr, stripTaskUnverifiableFindings(&pr, nil))
++	lines := stripTaskUnverifiableFindings(&pr, nil)
+ 
+ 	require.Len(t, pr.Tasks[0].Findings, 1)
+ 	assert.Equal(t, verdict.CategoryContradictedCodebaseClaim, pr.Tasks[0].Findings[0].Category,
+ 		"the contradiction stays on its task")
+ 
+-	require.Len(t, pr.PlanFindings, 1)
+-	assert.Equal(t, "codebase_reference_checklist", pr.PlanFindings[0].Criterion)
+-	assert.Contains(t, pr.PlanFindings[0].Evidence, "unverifiable-evidence")
+-	assert.NotContains(t, pr.PlanFindings[0].Evidence, "contradiction-evidence",
++	assert.Empty(t, pr.PlanFindings, "the checklist is not a finding")
++	require.Len(t, lines, 1)
++	assert.Contains(t, lines[0], "unverifiable-evidence")
++	assert.NotContains(t, lines[0], "contradiction-evidence",
+ 		"a hard contradiction must never be rolled into the go-grep-it-yourself checklist")
+ }
+ 
+@@ -89,8 +89,8 @@ func TestCalibratePlanVerdict_StillForcePassesUnverifiableOnly(t *testing.T) {
+ 	}
+ 	calibratePlanVerdictForUnverifiableOnly(&pr, false)
+ 	assert.Equal(t, verdict.VerdictPass, pr.PlanVerdict)
+-	assert.NotContains(t, pr.NextAction, "codebase_reference_checklist finding",
+-		"no checklist was appended for this plan-level-only claim; next_action must not name it")
++	assert.NotContains(t, pr.NextAction, "codebase_reference_checklist",
++		"no checklist was built for this plan-level-only claim; next_action must not name it")
+ 	assert.Contains(t, pr.NextAction, "unverifiable_codebase_claim finding")
+ }
+ 
+diff --git a/internal/mcpsrv/summary_forgery_test.go b/internal/mcpsrv/summary_forgery_test.go
+index 96d1d46..0813f3d 100644
+--- a/internal/mcpsrv/summary_forgery_test.go
++++ b/internal/mcpsrv/summary_forgery_test.go
+@@ -272,6 +272,7 @@ func summaryFormatterCases() []summaryFormatterCase {
+ 					Escalate:                   true,
+ 					WaivedFindings:             []verdict.WaivedFinding{seedWaived()},
+ 					ControllerRulings:          []AppliedRuling{{FindingID: "f_89abcdef", Ruling: "ruling"}},
++					CodebaseReferenceChecklist: []string{"checklist entry"},
+ 				}
+ 			},
+ 			render: func(in any) string { return formatEnvelopeSummary(*in.(*Envelope)) },
+@@ -304,9 +305,10 @@ func summaryFormatterCases() []summaryFormatterCase {
+ 							ExitContracts:         []string{"exit contract"},
+ 							NormativeTestBodies:   []string{"test body"},
+ 						}},
+-						NextAction:   "next",
+-						Partial:      true,
+-						SummaryBlock: "summary",
++						NextAction:                 "next",
++						Partial:                    true,
++						SummaryBlock:               "summary",
++						CodebaseReferenceChecklist: []string{"checklist entry"},
+ 					},
+ 					Meta: planSummaryMeta{
+ 						ModelUsed:    "anthropic:model",

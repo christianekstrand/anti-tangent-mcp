@@ -1,12 +1,14 @@
 # Capturing CodeScene stats over time
 
-CodeScene (the [codescene-oss MCP server](https://github.com/codescene-oss/codescene-mcp-server)) recomputes Code Health on each call but keeps **no history**, and anti-tangent's server never sees those calls (they run in the agent's MCP-client context). So to accumulate a CodeScene trend, a Claude Code **PostToolUse hook** appends one counts-only record per `analyze_change_set` run to a file in `ANTI_TANGENT_STATS_DIR`, and anti-tangent's Compactor aggregates it into `rollup.json`.
+CodeScene (the [codescene-oss MCP server](https://github.com/codescene-oss/codescene-mcp-server)) recomputes Code Health on each call but keeps **no history**, and anti-tangent's server never sees those calls (they run in the agent's MCP-client context). So the implementer hands the result over: it passes `analyze_change_set`'s output to `validate_completion` as the `codescene` argument, and the server appends one counts-only record per reported run to `codescene-events.jsonl` in `ANTI_TANGENT_STATS_DIR`. anti-tangent's Compactor aggregates that file into `rollup.json`.
 
-This is active only when `ANTI_TANGENT_STATS_DIR` is set **and** CodeScene is configured in the host.
+This is active only when `ANTI_TANGENT_STATS_DIR` is set. Nothing has to be registered in the host.
 
 ## What is recorded, when
 
-`analyze_change_set` is the branch-vs-base Code Health review — the meaningful per-task metric. The hook fires on **every** `analyze_change_set` call and appends one record; the mid-task `pre_commit_code_health_safeguard` and `code_health_review` are **not** matched, so they are not recorded. No dedup — one record per run.
+A record is written for a `validate_completion` call that reached the reviewer and whose `codescene` argument reports a run (`ran: true`, or raw `analyze_change_set` output, which the server reduces). A skip (`ran: false`) and a call with no `codescene` argument write nothing.
+
+An implementer resends its CodeScene result on every `validate_completion` retry, and a retry is not a new run. Within one task session the server therefore writes a record only when the reported result differs from the one it last recorded for that session. A lightweight call (no `session_id`) has no session to remember that in, so each such call that reports a run writes a record.
 
 `analyze_change_set` returns **categorical** output (per-file verdicts, a quality gate, and per-finding problem-points), **not** a numeric Code Health score — so the record is verdict/problem-point based, not score based.
 
@@ -25,12 +27,13 @@ This is active only when `ANTI_TANGENT_STATS_DIR` is set **and** CodeScene is co
 }
 ```
 
+- `tool` is `analyze_change_set`; a `codescene` argument that names any other tool is recorded as `other`, never by the name it sent.
 - `quality_gate` ∈ `passed | failed` (the tool's `quality_gates`).
 - `verdicts` = per-file `verdict` tally.
 - `net_pp` = Σ(finding `new-pp` − `old-pp`) across all findings; positive = more problem points after = worse.
 - `trend` = sign of `net_pp`: `>0 → regression`, `<0 → improvement`, `0 → neutral`.
-- `category_counts` = count of findings per CodeScene category (e.g. "Complex Method", "Bumpy Road Ahead").
-- **No file paths, no code, no function names, no session id** — privacy parity with anti-tangent's own `events.jsonl`.
+- `category_counts` = count of findings per CodeScene category (e.g. "Complex Method", "Bumpy Road Ahead"). The keys are the category names the caller sent, of which the server keeps the 20 largest. In this file a key is kept only when it reads as a plain category name — up to 40 characters, starting with a letter, of letters, spaces, commas, apostrophes and hyphens; any other key (one carrying a path, a digit or a colon, say) is counted as `other`.
+- **No file paths, no code, no function names, no session id** — privacy parity with anti-tangent's own `events.jsonl`. The argument's free-text fields (`skip_reason`, `skip_evidence`, `base_ref`) are never written to this file.
 
 ## How it surfaces
 
@@ -50,51 +53,39 @@ During compaction, anti-tangent reads `codescene-events.jsonl`, aggregates the c
 
 Consumers read `rollup.json` and look for the optional `codescene` block — **absence means "no CodeScene data this window," not an error.** The raw `codescene-events.jsonl` is retention-pruned by `ANTI_TANGENT_STATS_RETENTION_DAYS` alongside `events.jsonl`.
 
-**Note on pruning and zero-valued fields.** The record's fields (`quality_gate`, `files_analyzed`, `verdicts`, `trend`, `net_pp`, `category_counts`) are all `omitempty` in Go. Retention-pruning rewrites `codescene-events.jsonl` by re-marshalling the records it keeps, so after a prune, a genuinely-neutral record (e.g. `net_pp: 0`, no findings) may be missing keys that a fresh record — like the example above — would still show. This round-trips losslessly in Go (the zero value and "key absent" decode to the same thing) and no consumer reads the raw file directly, so it is not a defect, but don't read a pruned record's missing key as "field never recorded."
+**Note on zero-valued fields.** The record's fields (`quality_gate`, `files_analyzed`, `verdicts`, `trend`, `net_pp`, `category_counts`) are all `omitempty` in Go, so a genuinely-neutral record (e.g. `net_pp: 0`, no findings) is missing keys that the example above shows. The zero value and "key absent" decode to the same thing and no consumer reads the raw file directly, so don't read a missing key as "field never recorded."
 
-## Enable it
+## The PostToolUse hook is retired
 
-The hook script ships in this repo at `examples/hooks/codescene-log.sh`. Register it as a Claude Code PostToolUse hook in `~/.claude/settings.json` (additive — keep any existing PostToolUse entries):
+Earlier versions had no server-side writer: a Claude Code `PostToolUse` hook, `examples/hooks/codescene-log.sh`, appended the record on every `analyze_change_set` call. The server writes it now, so with the hook still registered each run would be counted twice.
 
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "mcp__codescene__analyze_change_set",
-        "hooks": [
-          { "type": "command", "command": "/absolute/path/to/anti-tangent-mcp/examples/hooks/codescene-log.sh", "timeout": 10 }
-        ]
-      }
-    ]
-  }
-}
-```
+**If you registered that hook, remove its entry** — the `PostToolUse` block in `~/.claude/settings.json` whose matcher is `mcp__codescene__analyze_change_set`. The script still ships so that a settings file pointing at it does not fail, but it writes nothing and exits 0.
 
-The hook reads the PostToolUse stdin (`tool_response` is a content-block array `[{type:"text", text:"<json>"}]`), extracts the `analyze_change_set` result, and appends the record. It is fire-and-forget: it always exits 0 and silently skips when `ANTI_TANGENT_STATS_DIR` is unset or the payload is unusable.
+Two differences from the hook's records are worth knowing when reading a trend across the change:
+
+- The hook recorded every `analyze_change_set` call, including ones made outside a task. The server records only a run that was reported to `validate_completion`.
+- A run reported by several retries of one task is one record, not one per call.
 
 ## Per-task attribution: `plan-runs.jsonl`
 
-The hook above records CodeScene runs anonymously and in aggregate — it cannot know which task
-it was inside. From v0.15.0 the implementer can instead pass the `analyze_change_set` digest to
-`validate_completion` as the `codescene` argument, which attributes it to a task exactly and
-surfaces it in `plan_run_report`'s per-task table.
+The same `codescene` argument attributes the result to its task exactly, and surfaces it in `plan_run_report`'s per-task table.
 
 Set `ANTI_TANGENT_PLAN_LEDGER=1` (with `ANTI_TANGENT_STATS_DIR`) to persist one line per
 completed task to `plan-runs.jsonl`, so `plan_run_report` survives a server restart — the
 in-memory plan-run store is otherwise lost like every other session state. The ledger also holds
-one header line per run minted by `validate_plan` — run id, verdict, quality, task count, creation
-time, no task title — pruned by its creation time, so a run no task ever attached to is still known
-after a restart.
+a header line per run minted by `validate_plan` — run id, verdict, quality, task count, creation
+time and the plan's task headings — pruned by its creation time, so a run no task ever attached to
+is still known after a restart.
 
 **Privacy: this file is different from the others.** `events.jsonl` and
 `codescene-events.jsonl` are deliberately content-free — no titles, no paths, no code.
-`plan-runs.jsonl` carries **task titles**. That is why it needs its own opt-in instead of
-inheriting `ANTI_TANGENT_STATS_DIR`. `plan-runs.jsonl` **is** now subject to
+`plan-runs.jsonl` carries **task titles**, and the caller's `skip_reason`, `skip_evidence` and
+`base_ref` as sent. That is why it needs its own opt-in instead of
+inheriting `ANTI_TANGENT_STATS_DIR`. `plan-runs.jsonl` **is** subject to
 `ANTI_TANGENT_STATS_RETENTION_DAYS` pruning, on the same retention tick as the two files above:
 a row is dropped once its task's completion time is older than the cutoff. A row written
 without a completion timestamp is retained rather than treated as infinitely old.
 
-The two channels do not double-count: the hook writes `codescene-events.jsonl` and feeds the
-rollup's `codescene` block; the in-band argument writes `plan-runs.jsonl` and feeds
-`plan_run_report`. A task can use either, both, or neither.
+One argument feeds both files: `codescene-events.jsonl`, which feeds the rollup's `codescene`
+block, and `plan-runs.jsonl`, which feeds `plan_run_report`. They are different views of the same
+run, not two counts of it.

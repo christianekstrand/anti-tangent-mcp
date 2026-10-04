@@ -24,16 +24,16 @@ func TestStripTaskUnverifiableFindings_LeavesContradictionsAttached(t *testing.T
 				Criterion: "c2", Evidence: "contradiction-evidence", Suggestion: "s"},
 		},
 	}}}
-	appendCodebaseReferenceChecklist(&pr, stripTaskUnverifiableFindings(&pr, nil))
+	lines := stripTaskUnverifiableFindings(&pr, nil, parsedTaskIndexes(pr.Tasks, nil))
 
 	require.Len(t, pr.Tasks[0].Findings, 1)
 	assert.Equal(t, verdict.CategoryContradictedCodebaseClaim, pr.Tasks[0].Findings[0].Category,
 		"the contradiction stays on its task")
 
-	require.Len(t, pr.PlanFindings, 1)
-	assert.Equal(t, "codebase_reference_checklist", pr.PlanFindings[0].Criterion)
-	assert.Contains(t, pr.PlanFindings[0].Evidence, "unverifiable-evidence")
-	assert.NotContains(t, pr.PlanFindings[0].Evidence, "contradiction-evidence",
+	assert.Empty(t, pr.PlanFindings, "the checklist is not a finding")
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "unverifiable-evidence")
+	assert.NotContains(t, lines[0], "contradiction-evidence",
 		"a hard contradiction must never be rolled into the go-grep-it-yourself checklist")
 }
 
@@ -58,7 +58,7 @@ func TestStripTaskUnverifiableFindings_LabelsByParsedPositionNotReviewerIndex(t 
 				Criterion: "c", Evidence: "e", Suggestion: "s"},
 		}},
 	}}
-	lines := stripTaskUnverifiableFindings(&pr, tasks)
+	lines := stripTaskUnverifiableFindings(&pr, tasks, parsedTaskIndexes(pr.Tasks, tasks))
 	require.Len(t, lines, 1)
 	assert.Equal(t, "Task 3: e", lines[0], "label must come from the parsed position, not the reviewer's chunk-local task_index")
 }
@@ -89,8 +89,8 @@ func TestCalibratePlanVerdict_StillForcePassesUnverifiableOnly(t *testing.T) {
 	}
 	calibratePlanVerdictForUnverifiableOnly(&pr, false)
 	assert.Equal(t, verdict.VerdictPass, pr.PlanVerdict)
-	assert.NotContains(t, pr.NextAction, "codebase_reference_checklist finding",
-		"no checklist was appended for this plan-level-only claim; next_action must not name it")
+	assert.NotContains(t, pr.NextAction, "codebase_reference_checklist",
+		"no checklist was built for this plan-level-only claim; next_action must not name it")
 	assert.Contains(t, pr.NextAction, "unverifiable_codebase_claim finding")
 }
 

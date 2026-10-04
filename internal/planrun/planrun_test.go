@@ -2,7 +2,10 @@ package planrun
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -426,4 +429,138 @@ func TestLatest_NilStore(t *testing.T) {
 	var s *Store
 	_, ok := s.Latest()
 	assert.False(t, ok)
+}
+
+func TestTaskFiles_ByIndexThenByTitleAndNeverOnDisk(t *testing.T) {
+	s := NewStore(time.Hour)
+	run := s.CreateWithTasks("pass", "rigorous", []PlanTask{
+		{Index: 1, Title: "Task 1: Store", Files: []string{"pkg/store.go"}},
+		{Index: 2, Title: "Task 2: Cache", Files: []string{"pkg/cache.go"}},
+	})
+
+	assert.Equal(t, []string{"pkg/cache.go"}, s.TaskFiles(run.ID, TaskRef{Index: 2, Title: "store"}), "an index in range wins over the title")
+	got := s.TaskFiles(run.ID, TaskRef{Title: "task 1:  store"})
+	require.Equal(t, []string{"pkg/store.go"}, got, "a title matches its heading")
+	got[0] = "changed"
+	assert.Equal(t, []string{"pkg/store.go"}, s.TaskFiles(run.ID, TaskRef{Index: 1}), "TaskFiles returns a copy")
+	assert.Nil(t, s.TaskFiles(run.ID, TaskRef{Index: 9, Title: "nothing"}), "an unmatched task lists nothing")
+	assert.Nil(t, s.TaskFiles("pr_unknown", TaskRef{Index: 1}), "an unknown run lists nothing")
+
+	dir := t.TempDir()
+	require.NoError(t, (&Ledger{Dir: dir}).AppendHeader(run))
+	b, err := os.ReadFile(filepath.Join(dir, ledgerFile))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(b), "pkg/"), "the ledger header must not carry file paths: %s", b)
+}
+
+func mustTaskCount(t *testing.T, s *Store, runID string) int {
+	t.Helper()
+	n, ok := s.PlanTaskCount(runID)
+	require.True(t, ok)
+	return n
+}
+
+func TestRevise_KeepsTheIDAndRowsAndCountsTheRound(t *testing.T) {
+	s := NewStore(time.Hour)
+	run := s.CreateWithTasks("warn", "actionable", []PlanTask{{Index: 1, Title: "Task 1: A"}, {Index: 2, Title: "Task 2: B"}})
+	assert.Equal(t, 1, run.Revision)
+	_, ok := s.Attach(run.ID, "sess-1", TaskRef{Index: 2}, "pass")
+	require.True(t, ok)
+
+	review, revision, ok := s.Review(run.ID)
+	require.True(t, ok)
+	assert.Nil(t, review, "a run holds no review until one is stored")
+	assert.Equal(t, 1, revision)
+	require.True(t, s.SetReview(run.ID, "first"))
+
+	revised, ok := s.Revise(run.ID, "pass", "rigorous",
+		[]PlanTask{{Index: 1, Title: "Task 1: A"}, {Index: 2, Title: "Task 2: B"}, {Index: 3, Title: "Task 3: C"}}, "second")
+	require.True(t, ok)
+	assert.Equal(t, run.ID, revised.ID)
+	assert.Equal(t, 2, revised.Revision)
+	assert.Equal(t, "pass", revised.PlanVerdict)
+	assert.Equal(t, 3, revised.TaskCount)
+	require.Len(t, revised.Rows, 1, "a row attached before the round stays")
+	assert.Equal(t, 2, revised.Rows[0].Index)
+
+	assert.Nil(t, revised.review, "the returned copy does not expose the review")
+	revised.Tasks[0].Title = "changed"
+	assert.Equal(t, 3, mustTaskCount(t, s, run.ID))
+	assert.Equal(t, []string(nil), s.TaskFiles(run.ID, TaskRef{Title: "changed"}), "the returned copy shares nothing with the run")
+
+	review, revision, _ = s.Review(run.ID)
+	assert.Equal(t, "second", review)
+	assert.Equal(t, 2, revision)
+	_, ok = s.UpdateRow(run.ID, "sess-1", func(row *TaskRow) { row.Checkpoints++ })
+	assert.True(t, ok, "the session attached before the round still reaches its row")
+
+	passed := []PlanTask{{Index: 1, Title: "Task 1: A", Files: []string{"pkg/a.go"}}}
+	revised, ok = s.Revise(run.ID, "pass", "rigorous", passed, "third")
+	require.True(t, ok)
+	passed[0].Files[0] = "caller/changed.go"
+	revised.Tasks[0].Files[0] = "copy/changed.go"
+	snap, ok := s.Snapshot(run.ID)
+	require.True(t, ok)
+	snap.Tasks[0].Files[0] = "snapshot/changed.go"
+	assert.Equal(t, []string{"pkg/a.go"}, s.TaskFiles(run.ID, TaskRef{Index: 1}),
+		"a task's files are shared with neither the caller's slice nor a returned copy")
+
+	created := []PlanTask{{Index: 1, Title: "Task 1: A", Files: []string{"pkg/a.go"}}}
+	minted := s.CreateWithTasks("pass", "rigorous", created)
+	created[0].Files[0] = "caller/changed.go"
+	assert.Equal(t, []string{"pkg/a.go"}, s.TaskFiles(minted.ID, TaskRef{Index: 1}))
+
+	_, ok = s.Revise("pr_unknown", "pass", "rigorous", nil, nil)
+	assert.False(t, ok)
+	_, _, ok = s.Review("pr_unknown")
+	assert.False(t, ok)
+	assert.False(t, s.SetReview("pr_unknown", "x"))
+}
+
+func TestSoleLiveByTitle(t *testing.T) {
+	var none *Store
+	_, ok := none.SoleLiveByTitle("Store")
+	assert.False(t, ok, "a nil store holds no run")
+
+	s := NewStore(time.Hour)
+	_, ok = s.SoleLiveByTitle("Store")
+	assert.False(t, ok)
+
+	run := s.CreateWithTasks("pass", "rigorous", []PlanTask{
+		{Index: 1, Title: "Task 1: Store"}, {Index: 2, Title: "Task 2: Cache"}, {Index: 3, Title: "Task 3: Cache"},
+	})
+	s.mu.Lock()
+	seen := time.Now().Add(-time.Minute)
+	s.runs[run.ID].LastAccessed = seen
+	s.mu.Unlock()
+	id, ok := s.SoleLiveByTitle("task 1:  store")
+	require.True(t, ok)
+	assert.Equal(t, run.ID, id)
+	s.mu.Lock()
+	assert.Equal(t, seen, s.runs[run.ID].LastAccessed, "naming a run in a lookup must not keep it alive")
+	s.mu.Unlock()
+	_, ok = s.SoleLiveByTitle("Cache")
+	assert.False(t, ok, "a title two headings share names no task")
+	_, ok = s.SoleLiveByTitle("Other")
+	assert.False(t, ok)
+	_, ok = s.SoleLiveByTitle("")
+	assert.False(t, ok)
+
+	blank := NewStore(time.Hour)
+	blank.CreateWithTasks("pass", "rigorous", []PlanTask{{Index: 1, Title: "Task 1:"}, {Index: 2, Title: "Task 2: Store"}})
+	for _, title := range []string{"", "   ", "Task 3:", "task 9 : "} {
+		_, ok = blank.SoleLiveByTitle(title)
+		assert.False(t, ok, "title %q has nothing to match a heading on", title)
+	}
+
+	stale := s.CreateWithTasks("pass", "rigorous", []PlanTask{{Index: 1, Title: "Task 1: Store"}})
+	_, ok = s.SoleLiveByTitle("Store")
+	assert.False(t, ok, "two live runs: no guess")
+
+	s.mu.Lock()
+	s.runs[stale.ID].LastAccessed = time.Now().Add(-2 * time.Hour)
+	s.mu.Unlock()
+	id, ok = s.SoleLiveByTitle("Store")
+	require.True(t, ok, "a run idle past the TTL is not live")
+	assert.Equal(t, run.ID, id)
 }

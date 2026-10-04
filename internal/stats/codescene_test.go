@@ -2,6 +2,9 @@ package stats
 
 import (
 	"encoding/json"
+	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -126,4 +129,75 @@ func TestPruneCodescene(t *testing.T) {
 	if len(got) != 1 || !got[0].Ts.Equal(base) {
 		t.Fatalf("after prune got %d events, want 1 (the fresh one)", len(got))
 	}
+}
+
+func TestRecordCodescene_WritesAContentFreeRunRecord(t *testing.T) {
+	r := newTestRecorder(t, 1000)
+	r.RecordCodescene(codescene.Digest{
+		Ran: true, Tool: "analyze_change_set", QualityGate: "failed", FilesAnalyzed: 2,
+		Verdicts: &Verdicts{Degraded: 2}, Trend: "regression", NetPP: 2,
+		CategoryCounts: map[string]int{"Complex Method": 2},
+		SkipReason:     "a reason", SkipEvidence: "error text", BaseRef: "origin/feature-branch",
+	})
+
+	b, err := os.ReadFile(filepath.Join(r.dir, codesceneFile))
+	require.NoError(t, err)
+	line := strings.TrimSpace(string(b))
+	for _, absent := range []string{"skip_reason", "skip_evidence", "base_ref", "feature-branch", `"ran"`} {
+		assert.NotContains(t, line, absent)
+	}
+
+	events, err := readCodescene(r.dir)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.False(t, events[0].Ts.IsZero())
+	assert.Equal(t, codescene.Digest{
+		Tool: "analyze_change_set", QualityGate: "failed", FilesAnalyzed: 2,
+		Verdicts: &Verdicts{Degraded: 2}, Trend: "regression", NetPP: 2,
+		CategoryCounts: map[string]int{"Complex Method": 2},
+	}, events[0].Digest)
+
+	cr := computeCodescene(events)
+	require.NotNil(t, cr)
+	assert.Equal(t, 1, cr.Runs)
+	assert.Equal(t, 1, cr.GatesFailed)
+
+	var nilRecorder *Recorder
+	nilRecorder.RecordCodescene(codescene.Digest{Ran: true})
+}
+
+func TestRunRecord_NamesOnlyTheExpectedTool(t *testing.T) {
+	assert.Equal(t, "analyze_change_set", RunRecord(codescene.Digest{Tool: "analyze_change_set"}).Tool)
+	assert.Equal(t, "analyze_change_set", RunRecord(codescene.Digest{}).Tool, "a digest reduced from raw output may carry no tool")
+	assert.Equal(t, "other", RunRecord(codescene.Digest{Tool: "ran it by hand on src/billing/invoice.go"}).Tool,
+		"tool is caller text and must not reach the record")
+}
+
+func TestRunRecord_CountsAKeyThatIsNotAPlainCategoryNameAsOther(t *testing.T) {
+	long := strings.Repeat("a", 41)
+	in := map[string]int{
+		"Complex Method":   2,
+		"Bumpy Road Ahead": 1,
+		"Complex Method in internal/billing/invoice.go": 3,
+		"Complex Method 2":   4,
+		long:                 5,
+		"Large Method: Load": 6,
+	}
+	sent := maps.Clone(in)
+
+	got := RunRecord(codescene.Digest{CategoryCounts: in}).CategoryCounts
+
+	assert.Equal(t, map[string]int{"Complex Method": 2, "Bumpy Road Ahead": 1, "other": 18}, got)
+	assert.Equal(t, sent, in, "the caller's map is left as sent")
+}
+
+func TestRunRecord_KeepsTheLongestPlainCategoryNameAndAddsToASentOther(t *testing.T) {
+	longest := strings.Repeat("a", 40)
+	got := RunRecord(codescene.Digest{CategoryCounts: map[string]int{longest: 1, "other": 2, "a/b": 3}}).CategoryCounts
+	assert.Equal(t, map[string]int{longest: 1, "other": 5}, got)
+}
+
+func TestRunRecord_NoCategoryCountsStaysNil(t *testing.T) {
+	assert.Nil(t, RunRecord(codescene.Digest{}).CategoryCounts)
+	assert.Nil(t, RunRecord(codescene.Digest{CategoryCounts: map[string]int{}}).CategoryCounts)
 }

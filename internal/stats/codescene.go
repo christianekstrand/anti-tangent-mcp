@@ -3,6 +3,7 @@ package stats
 import (
 	"encoding/json"
 	"math"
+	"regexp"
 	"time"
 
 	"github.com/patiently/anti-tangent-mcp/internal/codescene"
@@ -14,10 +15,10 @@ const codesceneFile = "codescene-events.jsonl"
 // compiling; the canonical definition lives in internal/codescene.
 type Verdicts = codescene.Verdicts
 
-// CodesceneEvent is the per-run record the hook appends (see
-// docs/team-setup/codescene-stats.md). anti-tangent reads this file and, from
-// v0.15.0, may also receive the same shape in band as the validate_completion
-// `codescene` argument. Counts + metadata only — no file paths.
+// CodesceneEvent is one CodeScene run as codescene-events.jsonl holds it (see
+// docs/team-setup/codescene-stats.md). The server appends one for a
+// validate_completion call whose `codescene` argument reports a run. Counts
+// and metadata only: no file path, no ref name, no skip text.
 // analyze_change_set is categorical (verdicts / quality-gate / problem-points),
 // not a 1-10 score.
 type CodesceneEvent struct {
@@ -60,6 +61,72 @@ type CodesceneRollup struct {
 	CategoryHistogram map[string]int `json:"category_histogram"`
 	WindowStart       time.Time      `json:"window_start"`
 	WindowEnd         time.Time      `json:"window_end"`
+}
+
+// codesceneRunTool is the one tool name a run record carries.
+const codesceneRunTool = "analyze_change_set"
+
+// codesceneOtherCategory is the key that takes the count of every category
+// key a record does not keep.
+const codesceneOtherCategory = "other"
+
+// plainCategoryName matches a key that reads as a category name and nothing
+// more: letters and the punctuation a name uses, with no digit, path
+// separator, dot or colon, so it cannot carry a file path, a line number or a
+// function name.
+var plainCategoryName = regexp.MustCompile(`^[A-Za-z][A-Za-z ,'-]{0,39}$`)
+
+// plainCategoryCounts returns a copy of counts holding only the keys that
+// read as plain category names, with every other key's count added to
+// "other". The keys are caller text and there is no list of CodeScene's
+// category names to check them against. It returns nil for no counts.
+func plainCategoryCounts(counts map[string]int) map[string]int {
+	if len(counts) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(counts))
+	for k, n := range counts {
+		if !plainCategoryName.MatchString(k) {
+			k = codesceneOtherCategory
+		}
+		out[k] += n
+	}
+	return out
+}
+
+// RunRecord reduces d to the fields a CodesceneEvent may hold. The caller's
+// free text — skip reason, skip evidence, base ref — is left out, and so is
+// Ran: every record is a run. Tool is caller text too, so a record names the
+// tool only when it is the expected one, and says "other" for anything else.
+// Category keys are caller text as well: see plainCategoryCounts.
+func RunRecord(d codescene.Digest) codescene.Digest {
+	tool := codesceneRunTool
+	if d.Tool != "" && d.Tool != codesceneRunTool {
+		tool = "other"
+	}
+	return codescene.Digest{
+		Tool:           tool,
+		QualityGate:    d.QualityGate,
+		FilesAnalyzed:  d.FilesAnalyzed,
+		Verdicts:       d.Verdicts,
+		Trend:          d.Trend,
+		NetPP:          d.NetPP,
+		CategoryCounts: plainCategoryCounts(d.CategoryCounts),
+	}
+}
+
+// RecordCodescene appends one CodeScene run, reduced by RunRecord, to
+// codescene-events.jsonl. Best-effort, and safe on a nil Recorder.
+func (r *Recorder) RecordCodescene(d codescene.Digest) {
+	if r == nil {
+		return
+	}
+	ev := CodesceneEvent{Ts: r.clock().Truncate(time.Second), Digest: RunRecord(d)}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := appendJSONL(r.dir, codesceneFile, ev); err != nil {
+		r.logger.Warn("stats codescene append failed", "err", err)
+	}
 }
 
 func readCodescene(dir string) ([]CodesceneEvent, error) {

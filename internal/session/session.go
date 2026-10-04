@@ -102,6 +102,10 @@ type Session struct {
 	// cleared. Nothing the implementer does clears that finding, so it is
 	// returned once.
 	CodesceneSkipReported bool
+	// CodesceneEventKey identifies the CodeScene run most recently written to
+	// the stats event file for this session, so a call that sends the same
+	// result again does not record the run a second time.
+	CodesceneEventKey string
 	// OverBuildingAnswered is set once a validate_completion on the session
 	// carried a finding_responses answer to an over_building finding, and
 	// never cleared: an answer is sent once, and must still stand on the

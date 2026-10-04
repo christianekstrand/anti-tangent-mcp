@@ -37,7 +37,7 @@ The integration is **system-agnostic**: superpowers, hone-ai, vanilla Claude Cod
 
 **Pair with a codebase-aware review for any plan that lands in real code.** Text-only + codebase-aware catches both classes; either alone has a known blind spot.
 
-When the reviewer meets a plan claim it cannot verify text-only, it flags `unverifiable_codebase_claim` rather than silently passing. These are *not failures* — treat them as "things to grep before dispatching."
+A claim the reviewer cannot verify text-only is flagged `unverifiable_codebase_claim`, not passed. Task-level ones go to the `codebase_reference_checklist` field, not the findings: things to grep before dispatch, not failures.
 
 When `validate_plan`'s `context_paths` attached the relevant file, the reviewer
 verifies the claim against it instead of flagging `unverifiable_codebase_claim`. If the attached

@@ -1,0 +1,88 @@
+diff --git a/internal/planrun/ledger_test.go b/internal/planrun/ledger_test.go
+index fb4c4c4..1a88fc3 100644
+--- a/internal/planrun/ledger_test.go
++++ b/internal/planrun/ledger_test.go
+@@ -473,3 +473,27 @@ func TestLedger_HeaderAfterRowsStillCarriesThePlansTasks(t *testing.T) {
+ 	assert.False(t, got.CreatedAt.IsZero())
+ 	require.Len(t, got.Rows, 1)
+ }
++
++func TestLedger_LoadTakesTheLatestRoundsHeader(t *testing.T) {
++	dir := t.TempDir()
++	l := &Ledger{Dir: dir}
++	s := NewStore(time.Hour)
++	run := s.CreateWithTasks("warn", "actionable", []PlanTask{{Index: 1, Title: "Task 1: A"}})
++	require.NoError(t, l.AppendHeader(run))
++	row, ok := s.Attach(run.ID, "sess-1", TaskRef{Index: 1}, "pass")
++	require.True(t, ok)
++	require.NoError(t, l.Append(run, row))
++	revised, ok := s.Revise(run.ID, "pass", "rigorous", []PlanTask{{Index: 1, Title: "Task 1: A"}, {Index: 2, Title: "Task 2: B"}}, nil)
++	require.True(t, ok)
++	require.NoError(t, l.AppendHeader(revised))
++
++	got, ok := l.Load(run.ID)
++	require.True(t, ok)
++	assert.Equal(t, 2, got.Revision)
++	assert.Equal(t, "pass", got.PlanVerdict)
++	assert.Equal(t, 2, got.TaskCount)
++	require.Len(t, got.Tasks, 2)
++	assert.Equal(t, "Task 2: B", got.Tasks[1].Title)
++	require.Len(t, got.Rows, 1)
++	assert.Equal(t, run.CreatedAt.UTC(), got.CreatedAt.UTC())
++}
+diff --git a/internal/planrun/planrun_test.go b/internal/planrun/planrun_test.go
+index 41bcad7..97d28eb 100644
+--- a/internal/planrun/planrun_test.go
++++ b/internal/planrun/planrun_test.go
+@@ -452,3 +452,51 @@ func TestTaskFiles_ByIndexThenByTitleAndNeverOnDisk(t *testing.T) {
+ 	require.NoError(t, err)
+ 	assert.False(t, strings.Contains(string(b), "pkg/"), "the ledger header must not carry file paths: %s", b)
+ }
++
++func mustTaskCount(t *testing.T, s *Store, runID string) int {
++	t.Helper()
++	n, ok := s.PlanTaskCount(runID)
++	require.True(t, ok)
++	return n
++}
++
++func TestRevise_KeepsTheIDAndRowsAndCountsTheRound(t *testing.T) {
++	s := NewStore(time.Hour)
++	run := s.CreateWithTasks("warn", "actionable", []PlanTask{{Index: 1, Title: "Task 1: A"}, {Index: 2, Title: "Task 2: B"}})
++	assert.Equal(t, 1, run.Revision)
++	_, ok := s.Attach(run.ID, "sess-1", TaskRef{Index: 2}, "pass")
++	require.True(t, ok)
++
++	review, revision, ok := s.Review(run.ID)
++	require.True(t, ok)
++	assert.Nil(t, review, "a run holds no review until one is stored")
++	assert.Equal(t, 1, revision)
++	require.True(t, s.SetReview(run.ID, "first"))
++
++	revised, ok := s.Revise(run.ID, "pass", "rigorous",
++		[]PlanTask{{Index: 1, Title: "Task 1: A"}, {Index: 2, Title: "Task 2: B"}, {Index: 3, Title: "Task 3: C"}}, "second")
++	require.True(t, ok)
++	assert.Equal(t, run.ID, revised.ID)
++	assert.Equal(t, 2, revised.Revision)
++	assert.Equal(t, "pass", revised.PlanVerdict)
++	assert.Equal(t, 3, revised.TaskCount)
++	require.Len(t, revised.Rows, 1, "a row attached before the round stays")
++	assert.Equal(t, 2, revised.Rows[0].Index)
++
++	assert.Nil(t, revised.review, "the returned copy does not expose the review")
++	revised.Tasks[0].Title = "changed"
++	assert.Equal(t, 3, mustTaskCount(t, s, run.ID))
++	assert.Equal(t, []string(nil), s.TaskFiles(run.ID, TaskRef{Title: "changed"}), "the returned copy shares nothing with the run")
++
++	review, revision, _ = s.Review(run.ID)
++	assert.Equal(t, "second", review)
++	assert.Equal(t, 2, revision)
++	_, ok = s.UpdateRow(run.ID, "sess-1", func(row *TaskRow) { row.Checkpoints++ })
++	assert.True(t, ok, "the session attached before the round still reaches its row")
++
++	_, ok = s.Revise("pr_unknown", "pass", "rigorous", nil, nil)
++	assert.False(t, ok)
++	_, _, ok = s.Review("pr_unknown")
++	assert.False(t, ok)
++	assert.False(t, s.SetReview("pr_unknown", "x"))
++}

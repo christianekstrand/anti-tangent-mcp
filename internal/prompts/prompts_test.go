@@ -2544,3 +2544,28 @@ func TestRenderPost_ReportsMandatedOverBuildingUnderItsOwnCriterion(t *testing.T
 	require.NotEqual(t, -1, own)
 	assert.Less(t, mandated, own)
 }
+
+func TestRenderPlanFindingsOnly_ShowsEarlierPlanFindingsInTheSuffixOnly(t *testing.T) {
+	in := PlanInput{PlanText: "# Plan\n\n### Task 1: First\n\nbody.\n### Task 2: Second\n\nbody.\n"}
+	plain, err := RenderPlanFindingsOnly(in)
+	require.NoError(t, err)
+	assert.NotContains(t, plain.User, "## Earlier plan-level findings")
+
+	in.PriorPlanFindings = []verdict.Finding{
+		{Severity: verdict.SeverityMajor, Category: verdict.CategoryAmbiguousSpec, Criterion: "task order", Evidence: "Task 2 needs\nTask 3's type"},
+		{Severity: verdict.SeverityMinor, Category: verdict.CategoryQuality, Criterion: "intro", Evidence: "no architecture section"},
+	}
+	out, err := RenderPlanFindingsOnly(in)
+	require.NoError(t, err)
+	golden(t, "plan_findings_only_with_prior_findings", out.System+"\n---USER---\n"+out.User)
+
+	assert.Equal(t, plain.UserPrefix, out.UserPrefix, "the prefix shared with the chunk prompts must not change")
+	assert.Contains(t, out.UserSuffix, "## Earlier plan-level findings")
+	assert.Contains(t, out.UserSuffix, "- [major][ambiguous_spec] task order — Task 2 needs Task 3's type\n",
+		"a multi-line field is folded onto its bullet")
+	assert.Contains(t, out.UserSuffix, "- [minor][quality] intro — no architecture section\n")
+	assert.Less(t, strings.Index(out.UserSuffix, "## Earlier plan-level findings"), strings.Index(out.UserSuffix, "## Output"))
+	assert.Contains(t, out.UserSuffix, "only if it is critical or\nmajor, or one the sections below require",
+		"the limit on new findings must not forbid the findings later sections make mandatory")
+	assert.NotContains(t, out.UserSuffix, "the edit\nintroduced", "the reviewer is not shown what the edit changed")
+}
