@@ -94,6 +94,8 @@ func (h *handlers) snapshotRow(runID string, row planrun.TaskRow) {
 			Categories:     row.Categories,
 			LinesAdded:     row.LinesAdded,
 			LinesRemoved:   row.LinesRemoved,
+
+			OverBuildingRuled: row.OverBuildingRuled,
 		},
 	})
 }

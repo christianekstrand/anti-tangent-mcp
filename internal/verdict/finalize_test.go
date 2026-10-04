@@ -140,3 +140,26 @@ func TestFinalizePlanVerdict_Idempotent(t *testing.T) {
 func TestFinalizePlanVerdict_NilSafe(t *testing.T) {
 	FinalizePlanVerdict(nil) // must not panic
 }
+
+func TestFinalizeVerdict_RepeatedMinorsDoNotCountTowardTheMinorRung(t *testing.T) {
+	minor := func(criterion, repeatOf string) Finding {
+		return Finding{Severity: SeverityMinor, Category: CategoryQuality, Criterion: criterion, RepeatOf: repeatOf}
+	}
+	carried := FinalizeVerdict(Result{Findings: []Finding{
+		minor("a", "f_00000001"), minor("b", "f_00000002"), minor("c", "f_00000003"),
+	}})
+	require.Equal(t, VerdictPass, carried.Verdict, "three minors already reported must not lift the verdict")
+	require.Len(t, carried.Findings, 3, "no noise_cluster advisory for carried minors")
+
+	mixed := FinalizeVerdict(Result{Findings: []Finding{
+		minor("a", "f_00000001"), minor("b", ""), minor("c", ""),
+	}})
+	require.Equal(t, VerdictPass, mixed.Verdict, "two new minors and one carried is below the rung")
+
+	fresh := FinalizeVerdict(Result{Findings: []Finding{
+		minor("a", "f_00000001"), minor("b", ""), minor("c", ""), minor("d", ""),
+	}})
+	require.Equal(t, VerdictWarn, fresh.Verdict, "three new minors still lift the verdict")
+	require.Len(t, fresh.Findings, 5)
+	require.Contains(t, fresh.Findings[4].Evidence, "3 minor findings")
+}

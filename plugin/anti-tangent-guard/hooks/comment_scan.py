@@ -71,8 +71,8 @@ def read_text_capped(path, encoding=None):
                 pass
 
 SCAN_EXTS = {
-    ".go", ".sh", ".bash", ".py", ".ts", ".tsx", ".js", ".jsx",
-    ".rs", ".java", ".kt", ".rb", ".c", ".h", ".cc", ".cpp", ".hpp",
+    ".go", ".sh", ".bash", ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".vue",
+    ".rs", ".java", ".kt", ".kts", ".rb", ".c", ".h", ".cc", ".cpp", ".hpp",
 }
 
 # Comment openers per extension. Hash-family files have no block comment
@@ -186,7 +186,12 @@ _MULTILINE_QUOTES = _TRIPLE_QUOTES + ("`",)
 # whose last byte is a backslash -- a Windows path, the idiomatic reason to
 # reach for Go backticks -- consume its own closing backtick and run to the
 # end of the file.
-_INTERPOLATING_EXTS = {".js", ".jsx", ".ts", ".tsx"}
+#
+# A .vue single-file component is read with these rules throughout: its script
+# block is JavaScript or TypeScript, and its style block's comments are the
+# same `/* */` form. The template block's `<!-- -->` comments are not a form
+# this scanner knows, so a comment there is never offered to the tells.
+_INTERPOLATING_EXTS = {".js", ".jsx", ".mjs", ".ts", ".tsx", ".vue"}
 
 # Extensions in which a backtick DELIMITS A STRING at all. Every interpolating
 # one does, and Go's raw string is the only non-interpolating addition --

@@ -14,7 +14,7 @@ This document has three audiences:
 
 - **Plan authors** — a task format that maps directly to `validate_task_spec` inputs (one-time read while drafting).
 - **Controllers** (orchestrators dispatching implementers — superpowers' `subagent-driven-development`, hone-ai's equivalent, or a hand-rolled loop) — a **required plan-handoff gate** plus a paste-in dispatch clause per subagent prompt.
-- **Implementing subagents** — a paste-in lifecycle clause mandating pre + post calls, treating mid calls as optional (call only when you suspect drift), and how to handle findings.
+- **Implementing subagents** — a paste-in lifecycle clause mandating pre + post calls, with mid calls when the guard asks or drift is suspected, and how to handle findings.
 
 The integration is **system-agnostic**: superpowers, hone-ai, vanilla Claude Code with a project-level `CLAUDE.md`, Cursor, or any MCP-capable harness. It ships as this core part plus the role parts above and the optional `project-knowledge.md`; load the ones your role needs and paste the relevant chunks where they belong.
 

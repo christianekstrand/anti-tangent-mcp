@@ -1921,6 +1921,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 	var spec session.TaskSpec
 	var review completionReview
 	var lightweightMalformedRulingIDs []string
+	skipReported, overBuildingAnswered := false, false
 	if lightweight {
 		// Synthesize a minimal spec for the reviewer. No session is created.
 		spec = session.TaskSpec{
@@ -1949,6 +1950,8 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 		spec = sess.Spec
 		state, _ := h.deps.Sessions.ReviewState(sess.ID)
 		review = buildCompletionReview(state, state.PreFindings, knownSessionFindings(state), responses, rulingArgs)
+		skipReported = state.CodesceneSkipReported
+		overBuildingAnswered = state.OverBuildingAnswered
 	}
 
 	// 8b. Built only once no rejection can follow: evidenceCacheKey leaves
@@ -1995,7 +1998,13 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 	// the block the session keeps as this call's prior findings.
 	var head []verdict.Finding
 	head = append(head, testEvidenceFindings(args.TestEvidence)...)
-	head = append(head, codesceneFindings(h.deps.Cfg.Codescene, args.Codescene)...)
+	// An evidenced skip's finding asks for nothing, so a session returns it
+	// once. A lightweight call has no session to remember it in and returns it
+	// every time.
+	evidencedSkip := isEvidencedSkip(h.deps.Cfg.Codescene, args.Codescene)
+	if !evidencedSkip || !skipReported {
+		head = append(head, codesceneFindings(h.deps.Cfg.Codescene, args.Codescene)...)
+	}
 	head = append(head, emptyPathFindings...)
 	if clamp.Severity != "" {
 		head = append(head, clamp)
@@ -2014,10 +2023,17 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 		}
 	}
 	escalateIDs := markRepeats(reviewer, review.prior, review.shown)
-	findings := make([]verdict.Finding, 0, len(head)+len(reviewer)+len(out.Server))
+	// The companion sits after the reviewer's block, so it is never stored as
+	// a prior finding and never shown to the next review as one.
+	overBuilding := reviewOverBuilding(reviewer, preTaskLinks, review, overBuildingAnswered)
+	tail := out.Server
+	if companion, ok := overBuilding.companion(); ok {
+		tail = append([]verdict.Finding{companion}, tail...)
+	}
+	findings := make([]verdict.Finding, 0, len(head)+len(reviewer)+len(tail))
 	findings = append(findings, head...)
 	findings = append(findings, reviewer...)
-	findings = append(findings, out.Server...)
+	findings = append(findings, tail...)
 	result := verdict.FinalizeVerdict(verdict.Result{
 		Findings:   findings,
 		NextAction: out.Result.NextAction,
@@ -2075,9 +2091,11 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 
 	if !lightweight {
 		update := session.ReviewUpdate{
-			IssuedIDs: envelopeIDs(env),
-			Rulings:   review.newRulings,
-			Escalated: env.Escalate,
+			IssuedIDs:             envelopeIDs(env),
+			Rulings:               review.newRulings,
+			Escalated:             env.Escalate,
+			CodesceneSkipReported: evidencedSkip,
+			OverBuildingAnswered:  answersOverBuilding(review.prior),
 		}
 		// A truncated review keeps the prior findings of the last complete one:
 		// its own list is incomplete, and a finding lost to truncation would
@@ -2096,9 +2114,9 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 	}
 
 	if lightweight {
-		h.recordLightweightCompletionRow(args, env)
+		h.recordLightweightCompletionRow(args, env, overBuilding.ruled(waived))
 	} else {
-		h.recordCompletionRow(sess, env, args.Codescene, args.FinalDiff)
+		h.recordCompletionRow(sess, env, args.Codescene, args.FinalDiff, overBuilding.ruled(waived))
 	}
 
 	h.recordStat(statParams{

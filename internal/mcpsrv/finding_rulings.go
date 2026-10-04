@@ -127,14 +127,74 @@ func waiveRuled(fs []verdict.Finding, taskKey string, rulings map[string]session
 	return kept, waived
 }
 
-// markRepeats sets RepeatOf on every finding that raises again a prior
-// finding this call answered — matched by fingerprint, or by a same_as naming
-// it — and returns the prior IDs its critical and major repeats raise again,
-// each once, in order. It clears same_as on every finding once read.
+// carriedMinors is the previous call's minor findings that a minor finding
+// on this call can raise again, answered or not. Each is matched once, whether
+// through take or, for an answered one, through drop: a fingerprint is only a
+// category and a criterion, and the completion prompt pins some criteria
+// (comment_hygiene, correctness), so two new findings can share a fingerprint
+// with one old one. Matching each old finding once keeps the second from
+// being read as already reported.
+type carriedMinors struct {
+	left []prompts.PriorFinding
+}
+
+// take returns the ID of the prior minor finding f raises again — the one its
+// same_as names, else the first with its fingerprint — and removes it, or
+// returns "" when none is left.
+func (c *carriedMinors) take(f verdict.Finding, shown map[string]bool) string {
+	named, fp, pick := sameAsID(f, shown), fingerprintOf(f), -1
+	for i, p := range c.left {
+		if named != "" && p.ID == named {
+			pick = i
+			break
+		}
+		if pick < 0 && fingerprintOf(p.Finding) == fp {
+			pick = i
+		}
+	}
+	if pick < 0 {
+		return ""
+	}
+	id := c.left[pick].ID
+	c.left = append(c.left[:pick], c.left[pick+1:]...)
+	return id
+}
+
+// drop removes the prior finding with the given ID and reports whether it was
+// still there. An answered prior minor is consumed through it, so it is matched
+// once like the rest.
+func (c *carriedMinors) drop(id string) bool {
+	for i, p := range c.left {
+		if p.ID == id {
+			c.left = append(c.left[:i], c.left[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// markRepeats sets RepeatOf on every finding that raises a prior finding
+// again — matched by a same_as naming it, or by fingerprint — in two cases: a
+// finding of any severity when this call answered the prior one, and a minor
+// finding that raises a prior minor finding, answered or not. The second case
+// is what lets FinalizeVerdict leave a carried-over nit out of the minor
+// count. A minor takes an answered prior of any severity at most once, so a
+// fingerprint shared by several new minors cannot hide them all; critical and
+// major findings may always take it. An unanswered critical or major repeat
+// stays unmarked: it is an open finding, not a dispute. Returns the prior IDs
+// the critical and major repeats raise again, each once, in order, and clears
+// same_as on every finding once read.
 func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[string]bool) []string {
 	answered := map[string]bool{}
 	answeredByFingerprint := map[string]string{}
+	var carried carriedMinors
+	priorMinor := map[string]bool{}
+	takenByMinor := map[string]bool{}
 	for _, p := range prior {
+		if p.Severity == verdict.SeverityMinor {
+			priorMinor[p.ID] = true
+			carried.left = append(carried.left, p)
+		}
 		if p.Response == "" {
 			continue
 		}
@@ -146,10 +206,28 @@ func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[s
 	var escalate []string
 	for i := range fs {
 		f := &fs[i]
-		if id := sameAsID(*f, shown); id != "" && answered[id] {
+		id := ""
+		if named := sameAsID(*f, shown); named != "" && answered[named] {
+			id = named
+		} else {
+			id = answeredByFingerprint[fingerprintOf(*f)]
+		}
+		isMinor := f.Severity == verdict.SeverityMinor
+		if id != "" && isMinor {
+			if priorMinor[id] {
+				if !carried.drop(id) {
+					id = ""
+				}
+			} else if takenByMinor[id] {
+				id = ""
+			} else {
+				takenByMinor[id] = true
+			}
+		}
+		if id != "" {
 			f.RepeatOf = id
-		} else if id := answeredByFingerprint[fingerprintOf(*f)]; id != "" {
-			f.RepeatOf = id
+		} else if isMinor {
+			f.RepeatOf = carried.take(*f, shown)
 		}
 		f.SameAs = nil
 		if f.RepeatOf != "" && (f.Severity == verdict.SeverityCritical || f.Severity == verdict.SeverityMajor) {
@@ -204,10 +282,109 @@ func verifiedAtCompletion(f verdict.Finding) bool {
 	if f.Category == verdict.CategoryAmbiguousSpec {
 		return true
 	}
-	if f.Category == verdict.CategoryQuality && strings.ToLower(strings.TrimSpace(f.Criterion)) == "over_building" {
-		return true
+	return isOverBuilding(f.Category, f.Criterion)
+}
+
+// overBuildingCriterion is the criterion every over-building finding carries.
+const overBuildingCriterion = "over_building"
+
+// isOverBuilding reports whether a category and criterion are the reviewer's
+// over-building finding. Criterion is free text on the wire, so case and
+// surrounding space are ignored.
+func isOverBuilding(category verdict.Category, criterion string) bool {
+	return category == verdict.CategoryQuality &&
+		strings.ToLower(strings.TrimSpace(criterion)) == overBuildingCriterion
+}
+
+// overBuildingCompanion is the major finding that accompanies an
+// over_building finding raised again with nobody having answered it. An
+// over_building finding is minor by template, so without the companion
+// nothing obliges an implementer to act on one. priorID is the earlier
+// finding it names.
+func overBuildingCompanion(priorID string) verdict.Finding {
+	return verdict.Finding{
+		Severity:  verdict.SeverityMajor,
+		Category:  verdict.CategoryUnaddressed,
+		Criterion: overBuildingCriterion,
+		Evidence: "The over_building finding " + priorID + " from an earlier validate_completion call is raised " +
+			"again on this one, and no finding_responses entry has answered it.",
+		Suggestion: "Cut the structure that finding names, or answer " + priorID + " in finding_responses with " +
+			"the reason it stays. A controller ruling on " + priorID + " also settles it.",
+	}
+}
+
+// overBuildingReview is what one validate_completion review shows about
+// over-building.
+type overBuildingReview struct {
+	// priorID is the over_building finding the previous complete review
+	// raised, or "" when it raised none.
+	priorID string
+	// open reports whether this review raises an over_building finding the
+	// implementer is expected to act on. One that names a pre-task finding in
+	// same_as is addressed to the plan author and is not open.
+	open bool
+	// settled reports whether the implementer or the controller has answered
+	// for the structure: a finding_responses answer on this call or an earlier
+	// one, or a ruling on the companion finding.
+	settled bool
+}
+
+// reviewOverBuilding reads the over-building state of one review. reviewer is
+// the reviewer's findings after the ruling waiver; preTaskLinks is, by index
+// into reviewer, the pre-task finding each one's same_as names.
+// answeredBefore is the session's memory of an earlier answer.
+func reviewOverBuilding(reviewer []verdict.Finding, preTaskLinks map[int]string, cr completionReview, answeredBefore bool) overBuildingReview {
+	ob := overBuildingReview{settled: answeredBefore}
+	for _, p := range cr.prior {
+		if !isOverBuilding(p.Category, p.Criterion) {
+			continue
+		}
+		if ob.priorID == "" {
+			ob.priorID = p.ID
+		}
+		ob.settled = ob.settled || p.Response != ""
+	}
+	if _, ruled := cr.rulings[fingerprintOf(overBuildingCompanion(""))]; ruled {
+		ob.settled = true
+	}
+	for i, f := range reviewer {
+		if isOverBuilding(f.Category, f.Criterion) && preTaskLinks[i] == "" {
+			ob.open = true
+		}
+	}
+	return ob
+}
+
+// answersOverBuilding reports whether this call's finding_responses answered
+// an over_building finding, which the session then remembers.
+func answersOverBuilding(prior []prompts.PriorFinding) bool {
+	for _, p := range prior {
+		if isOverBuilding(p.Category, p.Criterion) && p.Response != "" {
+			return true
+		}
 	}
 	return false
+}
+
+// companion returns the finding to add when an open over_building finding is
+// raised again and nobody has answered for it.
+func (ob overBuildingReview) companion() (verdict.Finding, bool) {
+	if !ob.open || ob.settled || ob.priorID == "" {
+		return verdict.Finding{}, false
+	}
+	return overBuildingCompanion(ob.priorID), true
+}
+
+// ruled reports whether the call settled an over_building finding without
+// cutting the structure: a controller ruling waived it, or it is open and
+// answered for.
+func (ob overBuildingReview) ruled(waived []verdict.WaivedFinding) bool {
+	for _, w := range waived {
+		if isOverBuilding(w.Category, w.Criterion) {
+			return true
+		}
+	}
+	return ob.open && ob.settled
 }
 
 // buildCompletionReview matches this call's answers to the stored prior

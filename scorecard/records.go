@@ -58,6 +58,9 @@ type TaskSnapshot struct {
 	Categories   map[string]int `json:"categories,omitempty"`
 	LinesAdded   int            `json:"lines_added,omitempty"`
 	LinesRemoved int            `json:"lines_removed,omitempty"`
+	// OverBuildingRuled counts the task's validate_completion calls whose
+	// over_building finding was answered or ruled on instead of fixed.
+	OverBuildingRuled int `json:"over_building_ruled,omitempty"`
 }
 
 // RunLine is one line of runs.jsonl: a run header (Header true, Task nil) or

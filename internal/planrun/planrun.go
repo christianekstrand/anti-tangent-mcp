@@ -73,6 +73,10 @@ type TaskRow struct {
 	// any validate_completion call on the task sent; zero when none sent one.
 	LinesAdded   int `json:"lines_added,omitempty"`
 	LinesRemoved int `json:"lines_removed,omitempty"`
+	// OverBuildingRuled counts the validate_completion calls on the task whose
+	// over_building finding was settled by an answer or a controller ruling
+	// instead of by cutting the structure.
+	OverBuildingRuled int `json:"over_building_ruled,omitempty"`
 }
 
 // PlanTask is one task of the validated plan: its 1-based position and its
