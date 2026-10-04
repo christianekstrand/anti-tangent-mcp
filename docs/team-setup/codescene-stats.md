@@ -32,7 +32,7 @@ An implementer resends its CodeScene result on every `validate_completion` retry
 - `verdicts` = per-file `verdict` tally.
 - `net_pp` = Σ(finding `new-pp` − `old-pp`) across all findings; positive = more problem points after = worse.
 - `trend` = sign of `net_pp`: `>0 → regression`, `<0 → improvement`, `0 → neutral`.
-- `category_counts` = count of findings per CodeScene category (e.g. "Complex Method", "Bumpy Road Ahead"). The keys are the category names the caller sent; the server keeps the 20 largest and the first 100 characters of each. In this file a key is kept only when it reads as a plain category name — up to 40 characters, starting with a letter, of letters, spaces, commas, apostrophes and hyphens; any other key (one carrying a path, a digit or a colon, say) is counted as `other`.
+- `category_counts` = count of findings per CodeScene category (e.g. "Complex Method", "Bumpy Road Ahead"). The keys are the category names the caller sent, of which the server keeps the 20 largest. In this file a key is kept only when it reads as a plain category name — up to 40 characters, starting with a letter, of letters, spaces, commas, apostrophes and hyphens; any other key (one carrying a path, a digit or a colon, say) is counted as `other`.
 - **No file paths, no code, no function names, no session id** — privacy parity with anti-tangent's own `events.jsonl`. The argument's free-text fields (`skip_reason`, `skip_evidence`, `base_ref`) are never written to this file.
 
 ## How it surfaces
