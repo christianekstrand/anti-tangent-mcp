@@ -89,8 +89,10 @@ func (t *task) latestCall(tool string) (ToolCall, bool) {
 }
 
 func (t *task) reviewModel() string {
-	if c, ok := t.latestCall("validate_completion"); ok && c.Model != "" {
-		return c.Model
+	if c, ok := t.latestCall("validate_completion"); ok {
+		if m := NormalizeModel(c.Model); m != "" {
+			return m
+		}
 	}
 	return "unknown"
 }
@@ -107,8 +109,11 @@ func (t *task) serverVersion() string {
 func (r *run) implementerModel(index int) string {
 	for _, src := range Sources {
 		for _, m := range r.outcomes[src].ImplementerModels {
-			if m.TaskIndex == index && m.Model != "" {
-				return m.Model
+			if m.TaskIndex != index {
+				continue
+			}
+			if model := NormalizeModel(m.Model); model != "" {
+				return model
 			}
 		}
 	}
@@ -130,4 +135,20 @@ func outcomeCounts(o OutcomeLine, index int) (high, minor int) {
 		}
 	}
 	return high, minor
+}
+
+// correctnessCategory is the outcome category a correctness defect is filed
+// under. It is the same word as the reviewer's own correctness category, which
+// is what lets a task's outcome be matched against its snapshot's categories.
+const correctnessCategory = "correctness"
+
+// outcomeHasHigh reports whether o attributes a critical or major finding of
+// category to task index.
+func outcomeHasHigh(o OutcomeLine, index int, category string) bool {
+	for _, f := range o.Findings {
+		if f.TaskIndex == index && f.Category == category && (f.Severity == "critical" || f.Severity == "major") {
+			return true
+		}
+	}
+	return false
 }

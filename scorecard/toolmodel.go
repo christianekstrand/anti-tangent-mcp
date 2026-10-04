@@ -79,6 +79,7 @@ type tmCtx struct {
 // pooled view's accumulators merge every publisher's calls for the same tool
 // and model.
 func (c *tmCtx) acc(tool, model string) *tmAcc {
+	model = NormalizeModel(model)
 	k := tmKey{tool: tool, model: model}
 	if c.byPublisher {
 		k.publisher = c.r.key.publisher
@@ -200,7 +201,8 @@ func (c *tmCtx) scoreCheckpoints(src string, t *task, high int) {
 	checkpointFlag := map[string]bool{}
 	for _, call := range t.snap.Calls {
 		if call.Tool == "check_progress" {
-			checkpointFlag[call.Model] = checkpointFlag[call.Model] || isFlag(call.Verdict)
+			m := NormalizeModel(call.Model)
+			checkpointFlag[m] = checkpointFlag[m] || isFlag(call.Verdict)
 		}
 	}
 	for model, flagged := range checkpointFlag {

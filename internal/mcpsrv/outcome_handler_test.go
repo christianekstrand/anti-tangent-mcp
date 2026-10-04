@@ -210,3 +210,69 @@ func TestRecordReviewOutcome_LiveRunWithoutSnapshotsIsKnown(t *testing.T) {
 func TestRecordReviewOutcomeRegisteredInCatalog(t *testing.T) {
 	assert.True(t, catalogHas(t, "record_review_outcome"))
 }
+
+// outcomeRun mints a run of n tasks, each with the final verdict "pass" and a
+// snapshot line, and returns its id.
+func outcomeRun(t *testing.T, h *handlers, n int) string {
+	t.Helper()
+	run := h.deps.PlanRuns.Create("pass", "rigorous", n)
+	for i := 0; i < n; i++ {
+		sid := "s" + string(rune('1'+i))
+		_, ok := h.deps.PlanRuns.Attach(run.ID, sid, planrun.TaskRef{Index: i + 1}, "pass")
+		require.True(t, ok)
+		row, _ := h.deps.PlanRuns.UpdateRow(run.ID, sid, func(r *planrun.TaskRow) { r.PostVerdict = "pass" })
+		h.snapshotRow(run.ID, row)
+	}
+	return run.ID
+}
+
+func TestRecordReviewOutcome_ListsTasksMissingAnImplementerModel(t *testing.T) {
+	h, _, dir := outcomeHandlers(t)
+	runID := outcomeRun(t, h, 3)
+	res := recordOutcome(t, h, RecordReviewOutcomeArgs{
+		PlanRunID: runID, Source: "final_review",
+		ImplementerModels: []OutcomeImplementerModelArg{{TaskIndex: 2, Model: "anthropic:claude-sonnet-5"}},
+		Findings:          []OutcomeFindingArg{},
+	})
+	require.True(t, res.Recorded, res.Reason)
+	assert.Equal(t, []int{1, 3}, res.MissingImplementerModels)
+	assert.Contains(t, res.SummaryBlock, "implementer model missing for tasks: 1, 3")
+	waitForScorecard(t, dir)
+}
+
+func TestRecordReviewOutcome_NoMissingModelsLeavesSummaryQuiet(t *testing.T) {
+	h, _, dir := outcomeHandlers(t)
+	runID := outcomeRun(t, h, 2)
+	res := recordOutcome(t, h, RecordReviewOutcomeArgs{
+		PlanRunID: runID, Source: "final_review",
+		ImplementerModels: []OutcomeImplementerModelArg{
+			{TaskIndex: 1, Model: "anthropic:claude-sonnet-5"},
+			{TaskIndex: 2, Model: "anthropic:claude-sonnet-5"},
+		},
+		Findings: []OutcomeFindingArg{},
+	})
+	require.True(t, res.Recorded, res.Reason)
+	assert.Equal(t, []int{}, res.MissingImplementerModels)
+	assert.NotContains(t, res.SummaryBlock, "implementer model missing")
+	waitForScorecard(t, dir)
+}
+
+func TestRecordReviewOutcome_MissingModelsIsAnArrayWhenNotRecorded(t *testing.T) {
+	h := &handlers{deps: newDeps(t, &fakeReviewer{name: "anthropic", resp: passResp("m")})}
+	res := recordOutcome(t, h, RecordReviewOutcomeArgs{PlanRunID: "pr_x", Source: "final_review"})
+	require.False(t, res.Recorded)
+	assert.NotNil(t, res.MissingImplementerModels)
+}
+
+func TestRecordReviewOutcome_ReviewNowDoesNotListMissingModels(t *testing.T) {
+	h, _, dir := outcomeHandlers(t)
+	runID := outcomeRun(t, h, 2)
+	res := recordOutcome(t, h, RecordReviewOutcomeArgs{
+		PlanRunID: runID, Source: "review_now",
+		Findings: []OutcomeFindingArg{},
+	})
+	require.True(t, res.Recorded, res.Reason)
+	assert.Equal(t, []int{}, res.MissingImplementerModels)
+	assert.NotContains(t, res.SummaryBlock, "implementer model missing")
+	waitForScorecard(t, dir)
+}

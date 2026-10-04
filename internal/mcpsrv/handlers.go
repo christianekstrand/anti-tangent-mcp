@@ -2098,7 +2098,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 	if lightweight {
 		h.recordLightweightCompletionRow(args, env)
 	} else {
-		h.recordCompletionRow(sess, env, args.Codescene)
+		h.recordCompletionRow(sess, env, args.Codescene, args.FinalDiff)
 	}
 
 	h.recordStat(statParams{

@@ -3,6 +3,7 @@ package mcpsrv
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,10 +90,60 @@ func (h *handlers) appendPlanLedger(runID string, row planrun.TaskRow) {
 	}
 }
 
+// hunkSpan returns how many old and new lines the hunk a header line opens
+// covers, and false when line is not a hunk header.
+func hunkSpan(line string) (oldLines, newLines int, ok bool) {
+	m := hunkHeaderRe.FindStringSubmatch(line)
+	if m == nil {
+		return 0, 0, false
+	}
+	oldLines, newLines = 1, 1
+	if m[2] != "" {
+		oldLines, _ = strconv.Atoi(m[2])
+	}
+	if m[4] != "" {
+		newLines, _ = strconv.Atoi(m[4])
+	}
+	return oldLines, newLines, true
+}
+
+// diffLineCounts returns how many lines a unified diff adds and removes. It
+// counts only inside hunks, and a hunk ends when the line counts its header
+// declares are used up. That is what tells a file header from a changed line
+// that looks like one: a removed line whose text begins with "-- " is counted,
+// while the "--- " and "+++ " lines that open the next file are not, with or
+// without a "diff --git" line between files.
+func diffLineCounts(diff string) (added, removed int) {
+	oldLeft, newLeft := 0, 0
+	for _, line := range strings.Split(diff, "\n") {
+		if o, n, ok := hunkSpan(line); ok {
+			oldLeft, newLeft = o, n
+			continue
+		}
+		if oldLeft <= 0 && newLeft <= 0 {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "+"):
+			added++
+			newLeft--
+		case strings.HasPrefix(line, "-"):
+			removed++
+			oldLeft--
+		case strings.HasPrefix(line, "\\"):
+		default:
+			oldLeft--
+			newLeft--
+		}
+	}
+	return added, removed
+}
+
 // completionRowUpdate is the plan-run row write for one validate_completion
-// result.
-func completionRowUpdate(env Envelope, cs *codescene.Digest) func(*planrun.TaskRow) {
-	sev, _, _, _ := stats.CountFindings(env.Findings)
+// result. finalDiff is the diff the call submitted, or "" when it sent none.
+func completionRowUpdate(env Envelope, cs *codescene.Digest, finalDiff string) func(*planrun.TaskRow) {
+	sev, cats, _, _ := stats.CountFindings(env.Findings)
+	added, removed := diffLineCounts(finalDiff)
 	state := planrun.StateMissing
 	if cs != nil {
 		if cs.Ran {
@@ -106,6 +157,15 @@ func completionRowUpdate(env Envelope, cs *codescene.Digest) func(*planrun.TaskR
 	return func(row *planrun.TaskRow) {
 		row.PostVerdict = env.Verdict
 		row.Severity = sev
+		for c, n := range cats {
+			if row.Categories == nil {
+				row.Categories = map[string]int{}
+			}
+			row.Categories[c] += n
+		}
+		if finalDiff != "" {
+			row.LinesAdded, row.LinesRemoved = added, removed
+		}
 		row.SubmissionOnly = env.SubmissionDefectOnly
 		row.Codescene = cs
 		row.CodesceneState = state
@@ -140,11 +200,11 @@ func (h *handlers) recordCheckpointRow(sess *session.Session, env Envelope) {
 // validate_completion call and writes the updated row to the plan ledger.
 // Best effort: an unknown run or row logs a warning and never changes the
 // result. A no-op when sess carries no plan run.
-func (h *handlers) recordCompletionRow(sess *session.Session, env Envelope, cs *codescene.Digest) {
+func (h *handlers) recordCompletionRow(sess *session.Session, env Envelope, cs *codescene.Digest, finalDiff string) {
 	if sess.PlanRunID == "" {
 		return
 	}
-	if row, ok := h.deps.PlanRuns.UpdateRow(sess.PlanRunID, sess.ID, completionRowUpdate(env, cs)); ok {
+	if row, ok := h.deps.PlanRuns.UpdateRow(sess.PlanRunID, sess.ID, completionRowUpdate(env, cs, finalDiff)); ok {
 		h.appendPlanLedger(sess.PlanRunID, row)
 	} else {
 		slog.Warn("plan run row update failed; run or row unknown",
@@ -162,7 +222,7 @@ func (h *handlers) recordLightweightCompletionRow(args ValidateCompletionArgs, e
 		return
 	}
 	ref := planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle}
-	if row, ok := h.deps.PlanRuns.UpsertLite(args.PlanRunID, ref, completionRowUpdate(env, args.Codescene)); ok {
+	if row, ok := h.deps.PlanRuns.UpsertLite(args.PlanRunID, ref, completionRowUpdate(env, args.Codescene, args.FinalDiff)); ok {
 		h.appendPlanLedger(args.PlanRunID, row)
 	} else {
 		slog.Warn("plan run lightweight update skipped; run unknown or expired, or no task named",

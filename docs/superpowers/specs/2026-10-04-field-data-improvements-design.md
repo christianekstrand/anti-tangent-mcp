@@ -290,8 +290,8 @@ gains the two categories.
 
 - `categories`: for each category, how many findings of it the task's completion calls returned,
   summed over calls. Category names come from the server's fixed set.
-- `lines_added`, `lines_removed`: counted from the latest call's `final_diff` (lines starting `+`
-  or `-`, excluding the `+++`/`---` file headers). Omitted when the call sent no diff.
+- `lines_added`, `lines_removed`: counted from the most recent `final_diff` a call sent (lines starting `+`
+  or `-`, excluding the `+++`/`---` file headers). Omitted when no call sent one. Only lines inside hunks are counted.
 
 `scorecard.Metrics` gains:
 
@@ -310,12 +310,12 @@ compiling. Showing the new metrics on `/ui/runs` is not part of Part 1.
 ### 4.5 Cohort hygiene
 
 - **Model id normalisation.** `scorecard.NormalizeModel` trims, lower-cases and strips one trailing
-  `-YYYYMMDD` date stamp. It is applied when records are **read** into cohort keys (implementer
+  date stamp (`-YYYYMMDD` or `-YYYY-MM-DD`). It is applied when records are **read** into cohort keys (implementer
   model, review model, tool-model rows), not when they are written, so the 0.26.0 records merge
   without a migration.
 - **Missing implementer models.** `record_review_outcome` still records the outcome, and its result
   gains `missing_implementer_models`: the indexes of tasks that have a final verdict and no model
-  in the call. The summary block names them. `outcome.md` tells the controller to send one entry
+  in the call. The list is reported for `final_review` only: a PR reviewer does not know the dispatch models. The summary block names them. `outcome.md` tells the controller to send one entry
   per dispatched task. The server stays advisory: nothing is rejected.
 - **Baseline choice.** `assignRegression` prefers, among the earlier time-disjoint cohorts of the
   same source and publisher, one with the same review model and implementer model; it falls back

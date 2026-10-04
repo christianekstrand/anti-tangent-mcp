@@ -47,6 +47,8 @@
             "unverifiable_codebase_claim",
             "convention_deviation",
             "attestation_contradiction",
+            "correctness",
+            "test_adequacy",
             "contradicted_codebase_claim",
             "kb_gap",
             "ambiguous_pick",

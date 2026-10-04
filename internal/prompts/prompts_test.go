@@ -2489,3 +2489,27 @@ func TestPrompts_PlanReuseCarriesItsContextLine(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, strings.Count(pre.User, want), "not in single task spec")
 }
+
+func TestRenderPost_AsksForCorrectnessBeforeCommentHygiene(t *testing.T) {
+	out, err := RenderPost(PostInput{
+		Spec:         sampleSpec(),
+		Summary:      "Implemented the handler.",
+		FinalDiff:    "--- a/h.go\n+++ b/h.go\n@@ -1 +1 @@\n-old\n+new\n",
+		TestEvidence: "go test ./... PASS",
+	})
+	require.NoError(t, err)
+	correctness := strings.Index(out.User, "### Correctness")
+	tests := strings.Index(out.User, "### Test adequacy")
+	comments := strings.Index(out.User, "### Comment hygiene")
+	require.NotEqual(t, -1, correctness, "prompt must have a Correctness section")
+	require.NotEqual(t, -1, tests, "prompt must have a Test adequacy section")
+	require.NotEqual(t, -1, comments)
+	assert.Less(t, correctness, tests)
+	assert.Less(t, tests, comments)
+	assert.Contains(t, out.User, "`category: correctness`")
+	assert.Contains(t, out.User, "`category: test_adequacy`")
+	assert.Contains(t, out.User, "Do not speculate about code that was not submitted")
+	assert.Contains(t, out.User, "that the submitted code contradicts")
+	assert.Contains(t, out.User, "report a defect only in code the summary or an acceptance criterion ties to this task")
+	assert.Contains(t, out.User, "OR for a `correctness` or `test_adequacy` finding that meets the severity bar in its own section below")
+}

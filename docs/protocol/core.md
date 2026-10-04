@@ -111,9 +111,9 @@ If unsure, look for the structured task block. No block → no protocol. Don't f
 
 ## 6. FAQ / failure modes
 
-**Finding categories.** Canonical set surfaced by the reviewer (authoritative enum: `internal/verdict/verdict.go`):
+**Finding categories.** Reviewer set (authoritative enum: `internal/verdict/verdict.go`):
 
-- Spec / lifecycle: `missing_acceptance_criterion`, `scope_drift`, `ambiguous_spec`, `unaddressed_finding`, `quality`, `convention_deviation`, `attestation_contradiction`, `unverifiable_codebase_claim`, `contradicted_codebase_claim`, `other`.
+- Spec / lifecycle: `missing_acceptance_criterion`, `scope_drift`, `ambiguous_spec`, `unaddressed_finding`, `quality`, `convention_deviation`, `attestation_contradiction`, `unverifiable_codebase_claim`, `contradicted_codebase_claim`, `correctness`, `test_adequacy`, `other`.
 - Evidence: `insufficient_evidence` — emitted by `validate_completion` when an AC cannot be assessed from the submitted evidence, and by `extract_project_knowledge`. Server-only: `malformed_evidence`, `codescene_not_run`, `codescene_skipped`.
 - Operational: `session_not_found`, `payload_too_large`.
 - Project-knowledge: `kb_gap`, `ambiguous_pick`, `missing_index_entry` (prime); `redundant_proposal`, `contradicts_existing` (extract).

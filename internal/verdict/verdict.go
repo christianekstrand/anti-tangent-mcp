@@ -65,6 +65,14 @@ const (
 	// for claims about files that were actually attached; the ground rules
 	// forbid emitting it about anything outside the attached set.
 	CategoryContradictedCodebaseClaim Category = "contradicted_codebase_claim"
+	// CategoryCorrectness is emitted by the completion review for a defect the
+	// submitted evidence shows: a wrong result, a dropped failure, an
+	// unprotected shared write. CategoryTestAdequacy is its counterpart for a
+	// test that would not fail if the behaviour it covers broke. Neither is in
+	// applySeverityFloor's list: both report what the evidence shows, so the
+	// reviewer's chosen severity is preserved.
+	CategoryCorrectness  Category = "correctness"
+	CategoryTestAdequacy Category = "test_adequacy"
 	// CategoryMalformedEvidence is server-only. It is emitted exclusively
 	// by the validate_completion evidence-shape guard, which constructs
 	// the envelope directly without round-tripping through Parse(). It is

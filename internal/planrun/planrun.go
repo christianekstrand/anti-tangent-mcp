@@ -66,6 +66,13 @@ type TaskRow struct {
 	// capped by AppendCall.
 	Calls        []ToolCall `json:"calls,omitempty"`
 	CallsDropped int        `json:"calls_dropped,omitempty"`
+	// Categories counts, per finding category, the findings every
+	// validate_completion call on the task returned, summed over the calls.
+	Categories map[string]int `json:"categories,omitempty"`
+	// LinesAdded and LinesRemoved are the size of the most recent final_diff
+	// any validate_completion call on the task sent; zero when none sent one.
+	LinesAdded   int `json:"lines_added,omitempty"`
+	LinesRemoved int `json:"lines_removed,omitempty"`
 }
 
 // PlanTask is one task of the validated plan: its 1-based position and its
@@ -262,10 +269,11 @@ func (s *Store) Snapshot(id string) (*Run, bool) {
 	return &cp, true
 }
 
-// cloneRow deep-copies row: Severity and Codescene would otherwise still alias
-// the live row's map and digest.
+// cloneRow deep-copies row: Severity, Categories and Codescene would
+// otherwise still alias the live row's maps and digest.
 func cloneRow(row TaskRow) TaskRow {
 	row.Severity = cloneIntMap(row.Severity)
+	row.Categories = cloneIntMap(row.Categories)
 	row.Codescene = cloneDigest(row.Codescene)
 	row.Calls = append([]ToolCall(nil), row.Calls...)
 	return row

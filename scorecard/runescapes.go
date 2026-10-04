@@ -43,3 +43,18 @@ func RunEscapes(lines []RunLine, o OutcomeLine) (escapes []Escape, tasksScored i
 	sort.Slice(escapes, func(i, j int) bool { return escapes[i].TaskIndex < escapes[j].TaskIndex })
 	return escapes, tasksScored, true
 }
+
+// TasksWithVerdict returns, ascending, the index of every task in lines whose
+// latest snapshot carries a final verdict.
+func TasksWithVerdict(lines []RunLine) []int {
+	out := []int{}
+	for _, r := range assemble(lines, nil, "") {
+		for _, t := range r.tasks {
+			if t.snap.PostVerdict != "" {
+				out = append(out, t.snap.Index)
+			}
+		}
+	}
+	sort.Ints(out)
+	return out
+}
