@@ -1,0 +1,337 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 9d47b93..2160077 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ - `anti-tangent-guard`'s comment scan covers `.mjs` and `.vue` (JavaScript rules) and `.kts` (Kotlin rules). The `<!-- -->` comments of a `.vue` template block are not recognised.
+ - The implementer protocol no longer calls `check_progress` optional and low-signal: the dispatch clause says to call it when the guard asks, or when drift is suspected.
+ - `codebase_reference_checklist` is a field of the `validate_task_spec` envelope and of the `validate_plan` response, no longer a finding. `validate_task_spec` returns one entry per claim the reviewer could not verify; `validate_plan` one entry per affected task. It does not count as a finding, as a minor on the verdict ladder, or toward `noise_cluster`, so three unverifiable references no longer lift a clean spec to `warn`. The summary block prints it under `checklist:`, `next_action` names it, and `events.jsonl` records its length as `checklist_items`. A caller that read the checklist from `findings` / `plan_findings` by its `codebase_reference_checklist` criterion must read the new field.
++- A path a task lists in its own `**Files:**` section is not a codebase claim. `validate_plan` drops an `unverifiable_codebase_claim` whose evidence names only such paths (line anchors included) before building `codebase_reference_checklist`, and its prompt tells the reviewer not to raise one. `validate_task_spec` does the same for the paths a `**Files:**` section in `context` lists and for the paths the named plan run recorded for the task. A claim that also names a symbol, another path or a convention stays on the checklist. The plan run keeps those paths in memory only; no stats file or ledger line carries them.
+ 
+ ## [0.26.0] - 2026-09-24
+ 
+diff --git a/internal/mcpsrv/handlers.go b/internal/mcpsrv/handlers.go
+index b160dcc..209f538 100644
+--- a/internal/mcpsrv/handlers.go
++++ b/internal/mcpsrv/handlers.go
+@@ -192,6 +192,7 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
+ 	result := out.Result
+ 	result.Findings = suppressTestabilityExtractionScopeDrift(result.Findings, inputs.TestabilityExtractions)
+ 	result.Findings = suppressUnverifiableCodebaseClaim(result.Findings, inputs.ControllerVerifiedReferences)
++	result.Findings = dropListedFileClaims(result.Findings, h.taskSpecListedFiles(args))
+ 	var checklist []string
+ 	result.Findings, checklist = splitTaskSpecChecklist(result.Findings)
+ 	result.Findings = withServerFindings(cc.Clamp, result.Findings, out.Server)
+diff --git a/internal/mcpsrv/listed_file_claims.go b/internal/mcpsrv/listed_file_claims.go
+new file mode 100644
+index 0000000..6a641fb
+--- /dev/null
++++ b/internal/mcpsrv/listed_file_claims.go
+@@ -0,0 +1,124 @@
++package mcpsrv
++
++import (
++	"regexp"
++	"sort"
++	"strings"
++
++	"github.com/patiently/anti-tangent-mcp/internal/verdict"
++)
++
++// listedPathMark stands in for a listed path while a claim is examined. It is
++// a control character, which no claim text and no path contains.
++const listedPathMark = "\x00"
++
++var (
++	// markedAnchorRe matches a listed path's stand-in together with a line
++	// anchor that followed the path: ":57", ":57-70", ":57,70".
++	markedAnchorRe = regexp.MustCompile(listedPathMark + `(?::\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)?`)
++	// codeSpanRe matches a backticked span that still holds something once
++	// the listed paths are gone.
++	codeSpanRe = regexp.MustCompile("`[^`]*[^`\\s][^`]*`")
++	// codeTokenRe matches what reads as a code reference outside backticks: a
++	// dotted name or file name (Foo.Bar, x.go), a path, a call, a snake_case
++	// or a camelCase identifier.
++	codeTokenRe = regexp.MustCompile(`[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+|\w/\w|\w\(|[A-Za-z]\w*_\w+|[a-z]+[A-Z]\w*`)
++	// midSentenceCapitalRe matches a capitalised word that does not open the
++	// claim or a sentence: in a claim about code that is a type or symbol
++	// name (Store, Reviewer) far more often than a proper noun.
++	midSentenceCapitalRe = regexp.MustCompile(`[^\s.!?]\s+[A-Z]\w*`)
++)
++
++// isPathRune reports whether r can be part of a path, so that a listed path
++// found next to one is only a piece of a longer, different path.
++func isPathRune(r rune) bool {
++	return r == '_' || r == '-' || r == '/' || r == '.' ||
++		(r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
++}
++
++// markListedPath replaces every whole occurrence of path p in s with
++// listedPathMark and reports whether there was one. An occurrence is whole
++// when no path character touches it on the left, and on the right nothing
++// that would continue it: a path character other than a dot, or a dot that an
++// extension follows. So with handlers.go listed, review_handlers.go,
++// pkg/handlers.go and handlers.go.tmpl are left alone, and "handlers.go." at
++// the end of a sentence is marked.
++func markListedPath(s, p string) (string, bool) {
++	var b strings.Builder
++	marked := false
++	for {
++		i := strings.Index(s, p)
++		if i < 0 {
++			break
++		}
++		end := i + len(p)
++		whole := (i == 0 || !isPathRune(rune(s[i-1]))) && !continuesPath(s[end:])
++		if whole {
++			b.WriteString(s[:i])
++			b.WriteString(listedPathMark)
++			marked = true
++		} else {
++			b.WriteString(s[:end])
++		}
++		s = s[end:]
++	}
++	b.WriteString(s)
++	return b.String(), marked
++}
++
++// continuesPath reports whether rest, the text right after a path, would make
++// the path a longer one.
++func continuesPath(rest string) bool {
++	if rest == "" {
++		return false
++	}
++	if rest[0] == '.' {
++		return len(rest) > 1 && isPathRune(rune(rest[1])) && rest[1] != '.'
++	}
++	return isPathRune(rune(rest[0]))
++}
++
++// claimIsOnlyListedPaths reports whether claim, an unverifiable-claim
++// finding's evidence, names at least one of files, whole, and nothing else
++// that reads as a code reference. Such a claim only repeats where the task says it
++// works. A claim that also names a symbol, another path or a convention is
++// still a claim, and anything this cannot tell apart is kept.
++func claimIsOnlyListedPaths(claim string, files []string) bool {
++	paths := append([]string(nil), files...)
++	// Longest first, so a path that is a prefix of another does not split it.
++	sort.Slice(paths, func(i, j int) bool { return len(paths[i]) > len(paths[j]) })
++	rest := strings.ReplaceAll(claim, listedPathMark, " ")
++	named := false
++	for _, p := range paths {
++		if p == "" {
++			continue
++		}
++		var marked bool
++		if rest, marked = markListedPath(rest, p); marked {
++			named = true
++		}
++	}
++	if !named {
++		return false
++	}
++	rest = markedAnchorRe.ReplaceAllString(rest, " ")
++	return !codeSpanRe.MatchString(rest) && !codeTokenRe.MatchString(rest) && !midSentenceCapitalRe.MatchString(rest)
++}
++
++// dropListedFileClaims removes every unverifiable_codebase_claim finding
++// whose evidence is only about paths in files, the paths the task's own
++// Files: section lists. Other findings pass through unchanged, and with no
++// files the input slice is returned as it is.
++func dropListedFileClaims(findings []verdict.Finding, files []string) []verdict.Finding {
++	if len(files) == 0 || len(findings) == 0 {
++		return findings
++	}
++	out := make([]verdict.Finding, 0, len(findings))
++	for _, f := range findings {
++		if f.Category == verdict.CategoryUnverifiableCodebaseClaim && claimIsOnlyListedPaths(f.Evidence, files) {
++			continue
++		}
++		out = append(out, f)
++	}
++	return out
++}
+diff --git a/internal/mcpsrv/plan_normalize.go b/internal/mcpsrv/plan_normalize.go
+index b348d6d..9acf3c7 100644
+--- a/internal/mcpsrv/plan_normalize.go
++++ b/internal/mcpsrv/plan_normalize.go
+@@ -37,8 +37,10 @@ func splitTaskUnverifiable(findings []verdict.Finding) (kept []verdict.Finding,
+ // stripTaskUnverifiableFindings removes every task-level
+ // unverifiable_codebase_claim finding and returns one checklist line per
+ // affected task, with that task's evidence joined by "; " and truncated at
+-// rollupEvidencePerTaskMax. Reviewer-emitted plan-level unverifiable findings
+-// stay where they are. Each task's Findings is reassigned to a fresh slice.
++// rollupEvidencePerTaskMax. A claim that only names paths the task's own
++// Files: section lists is dropped and reaches no line. Reviewer-emitted
++// plan-level unverifiable findings stay where they are. Each task's Findings
++// is reassigned to a fresh slice.
+ //
+ // The label numbers by the PARSED plan position, never by the reviewer's own
+ // task_index: validateChunkIdentity checks a chunk's titles and order but not
+@@ -52,13 +54,18 @@ func stripTaskUnverifiableFindings(pr *verdict.PlanResult, tasks []planparser.Ra
+ 	parsedIdx := parsedTaskIndexes(pr.Tasks, tasks)
+ 	var lines []string
+ 	for i := range pr.Tasks {
+-		kept, perTask := splitTaskUnverifiable(pr.Tasks[i].Findings)
++		idx := parsedIdx[i]
++		findings := pr.Tasks[i].Findings
++		if idx >= 0 {
++			findings = dropListedFileClaims(findings, planparser.ListedPaths(tasks[idx].Body))
++		}
++		kept, perTask := splitTaskUnverifiable(findings)
+ 		pr.Tasks[i].Findings = kept
+ 		if len(perTask) == 0 {
+ 			continue
+ 		}
+ 		taskNum := i + 1
+-		if idx := parsedIdx[i]; idx >= 0 {
++		if idx >= 0 {
+ 			taskNum = idx + 1
+ 		}
+ 		lines = append(lines, fmt.Sprintf("Task %d: %s",
+diff --git a/internal/mcpsrv/review_error.go b/internal/mcpsrv/review_error.go
+index 5fa4eee..ee1f54d 100644
+--- a/internal/mcpsrv/review_error.go
++++ b/internal/mcpsrv/review_error.go
+@@ -269,7 +269,7 @@ func planRunTasks(pr verdict.PlanResult, tasks []planparser.RawTask) []planrun.P
+ 	if len(tasks) > 0 {
+ 		out := make([]planrun.PlanTask, len(tasks))
+ 		for i, t := range tasks {
+-			out[i] = planrun.PlanTask{Index: i + 1, Title: t.Title}
++			out[i] = planrun.PlanTask{Index: i + 1, Title: t.Title, Files: planparser.ListedPaths(t.Body)}
+ 		}
+ 		return out
+ 	}
+diff --git a/internal/mcpsrv/task_spec_normalize.go b/internal/mcpsrv/task_spec_normalize.go
+index b01e3f3..ef00629 100644
+--- a/internal/mcpsrv/task_spec_normalize.go
++++ b/internal/mcpsrv/task_spec_normalize.go
+@@ -3,9 +3,23 @@ package mcpsrv
+ import (
+ 	"strings"
+ 
++	"github.com/patiently/anti-tangent-mcp/internal/planparser"
++	"github.com/patiently/anti-tangent-mcp/internal/planrun"
+ 	"github.com/patiently/anti-tangent-mcp/internal/verdict"
+ )
+ 
++// taskSpecListedFiles returns the paths the task's own Files: section lists:
++// the ones a Files: section in the caller's Context names, and the ones the
++// named plan run recorded for the task from the plan.
++func (h *handlers) taskSpecListedFiles(args ValidateTaskSpecArgs) []string {
++	files := planparser.ListedPaths(args.Context)
++	if args.PlanRunID == "" {
++		return files
++	}
++	ref := planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle}
++	return append(files, h.deps.PlanRuns.TaskFiles(args.PlanRunID, ref)...)
++}
++
+ // taskSpecChecklistNextAction is appended to validate_task_spec's next_action
+ // when the envelope carries a codebase_reference_checklist.
+ const taskSpecChecklistNextAction = " `codebase_reference_checklist` lists references the reviewer could not verify: " +
+diff --git a/internal/planparser/filerefs.go b/internal/planparser/filerefs.go
+index 3ba5e7b..23c6f29 100644
+--- a/internal/planparser/filerefs.go
++++ b/internal/planparser/filerefs.go
+@@ -351,3 +351,42 @@ func canonRefPath(p string) string {
+ 	}
+ 	return path.Clean(p)
+ }
++
++// listedBulletRe matches any labelled bullet of a **Files:** section —
++// "- Test: `a_test.go`" as well as the Create/Modify/Delete bullets — and
++// captures what follows the label.
++var listedBulletRe = regexp.MustCompile("^\\s*[-*]\\s+[^:`]+:\\s*(.+)$")
++
++// ListedPaths returns every path a task body's **Files:** section lists,
++// whatever the bullet's label, each once and in order of first appearance.
++// The section's bounds are FileRefs': it starts at the heading and stops at
++// the first line that is neither a bullet nor blank.
++func ListedPaths(body string) []string {
++	var out []string
++	seen := map[string]bool{}
++	inSection := false
++	for _, line := range strings.Split(body, "\n") {
++		if !inSection {
++			inSection = filesHeadingRe.MatchString(line)
++			continue
++		}
++		trimmed := strings.TrimSpace(line)
++		if trimmed == "" {
++			continue
++		}
++		if !strings.HasPrefix(trimmed, "- ") && !strings.HasPrefix(trimmed, "* ") {
++			break
++		}
++		m := listedBulletRe.FindStringSubmatch(line)
++		if m == nil {
++			continue
++		}
++		for _, p := range refPaths(m[1]) {
++			if !seen[p] {
++				seen[p] = true
++				out = append(out, p)
++			}
++		}
++	}
++	return out
++}
+diff --git a/internal/planrun/planrun.go b/internal/planrun/planrun.go
+index 7982486..0178338 100644
+--- a/internal/planrun/planrun.go
++++ b/internal/planrun/planrun.go
+@@ -84,6 +84,9 @@ type TaskRow struct {
+ type PlanTask struct {
+ 	Index int    `json:"index"`
+ 	Title string `json:"title"`
++	// Files are the paths the task's own Files: section lists. They are kept
++	// in memory only, so the ledger header never carries them.
++	Files []string `json:"-"`
+ }
+ 
+ // TaskRef is what a call says about the plan task it belongs to.
+@@ -224,6 +227,29 @@ func (s *Store) CreateWithTasks(planVerdict, planQuality string, tasks []PlanTas
+ 	return r
+ }
+ 
++// TaskFiles returns the paths run runID's plan lists for the task ref names,
++// by ref.Index when it is one of the plan's tasks and else by the one heading
++// matching ref.Title. It returns nil when the run is unknown or expired, or
++// ref names no plan task.
++func (s *Store) TaskFiles(runID string, ref TaskRef) []string {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	r, ok := s.runs[runID]
++	if !ok {
++		return nil
++	}
++	index := ref.Index
++	if index < 1 || index > len(r.Tasks) {
++		index = r.taskByTitle(titleKey(ref.Title))
++	}
++	for _, t := range r.Tasks {
++		if t.Index == index {
++			return append([]string(nil), t.Files...)
++		}
++	}
++	return nil
++}
++
+ // PlanTaskCount returns how many tasks run runID's plan has, and false when
+ // the run is unknown or expired.
+ func (s *Store) PlanTaskCount(runID string) (int, bool) {
+diff --git a/internal/prompts/templates/plan_rules.tmpl b/internal/prompts/templates/plan_rules.tmpl
+index 2e30e19..4ea23bd 100644
+--- a/internal/prompts/templates/plan_rules.tmpl
++++ b/internal/prompts/templates/plan_rules.tmpl
+@@ -36,7 +36,7 @@ A `contradicted_codebase_claim` finding must satisfy the evidence rule above AND
+ {{end}}
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example.{{if .ContextFiles}} This does not apply when you quote a signature or symbol verbatim from an attached file — that is ground truth, not illustration, and is the evidence a `contradicted_codebase_claim` finding rests on.{{end}}
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone{{if .ContextFiles}} or from an attached file{{end}} — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone{{if .ContextFiles}} or from an attached file{{end}} — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ {{if .ControllerVerifiedReferences -}}
+ Controller-verified references: the controller has already checked each of these against the codebase. Do not emit `unverifiable_codebase_claim` for a claim about one of them.

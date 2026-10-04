@@ -1,0 +1,205 @@
+diff --git a/internal/planrun/ledger.go b/internal/planrun/ledger.go
+index 8b53616..437e727 100644
+--- a/internal/planrun/ledger.go
++++ b/internal/planrun/ledger.go
+@@ -62,6 +62,9 @@ type ledgerLine struct {
+ 	// WrittenAt is set on task-row lines: when the line was appended. Prune
+ 	// keys a row that has not completed on it.
+ 	WrittenAt time.Time `json:"written_at,omitzero"`
++	// Revision is set on header lines: which validate_plan round wrote the
++	// line. A run has one header line per round.
++	Revision int `json:"revision,omitempty"`
+ }
+ 
+ // ledgerHeaderLine is the on-disk shape of a header. It is marshalled from its
+@@ -77,6 +80,7 @@ type ledgerHeaderLine struct {
+ 	Header          bool       `json:"header"`
+ 	CreatedAt       time.Time  `json:"created_at"`
+ 	Tasks           []PlanTask `json:"tasks,omitempty"`
++	Revision        int        `json:"revision,omitempty"`
+ }
+ 
+ // Ledger appends a task row each time one changes to plan-runs.jsonl, plus
+@@ -133,9 +137,10 @@ func (l *Ledger) Append(run *Run, row TaskRow) error {
+ 	return l.appendLine(b)
+ }
+ 
+-// AppendHeader records a run when validate_plan mints it, so a run that no
+-// task was ever attached to is still known to Load. It carries the plan's
+-// task headings, which the report lists for tasks never dispatched.
++// AppendHeader records a run when validate_plan mints it, and again for
++// every later round that revises it, so a run that no task was ever attached
++// to is still known to Load. It carries the plan's task headings, which the
++// report lists for tasks never dispatched.
+ func (l *Ledger) AppendHeader(run *Run) error {
+ 	if l == nil || l.Dir == "" {
+ 		return nil
+@@ -143,6 +148,7 @@ func (l *Ledger) AppendHeader(run *Run) error {
+ 	b, err := json.Marshal(ledgerHeaderLine{
+ 		HeaderPlanRunID: run.ID, PlanVerdict: run.PlanVerdict, PlanQuality: run.PlanQuality,
+ 		TaskCount: run.TaskCount, Header: true, CreatedAt: run.CreatedAt.UTC(), Tasks: run.Tasks,
++		Revision: run.Revision,
+ 	})
+ 	if err != nil {
+ 		return err
+@@ -236,20 +242,24 @@ func (l *Ledger) Load(planRunID string) (*Run, bool) {
+ 	return run, true
+ }
+ 
+-// mergeHeaderLine folds header line ln into run, field by field, so Load
+-// gets the header's CreatedAt, Tasks and TaskCount regardless of whether the
+-// header line is read before or after the task rows that reference the same
+-// run.
++// mergeHeaderLine folds header line ln into run, so Load gets the header's
++// CreatedAt, Tasks and TaskCount regardless of whether the header line is
++// read before or after the task rows that reference the same run. A run
++// revised by a later validate_plan round has several header lines: the one
++// with the highest revision describes the plan as it stands, and CreatedAt
++// stays the earliest.
+ func mergeHeaderLine(run *Run, ln ledgerLine) {
+-	if run.CreatedAt.IsZero() {
++	if run.CreatedAt.IsZero() || (!ln.CreatedAt.IsZero() && ln.CreatedAt.Before(run.CreatedAt)) {
+ 		run.CreatedAt = ln.CreatedAt
+ 	}
+-	if run.Tasks == nil {
+-		run.Tasks = ln.Tasks
+-	}
+-	if run.TaskCount == 0 {
+-		run.TaskCount = ln.TaskCount
++	if run.Tasks != nil && ln.Revision < run.Revision {
++		return
+ 	}
++	run.Revision = ln.Revision
++	run.Tasks = ln.Tasks
++	run.TaskCount = ln.TaskCount
++	run.PlanVerdict = ln.PlanVerdict
++	run.PlanQuality = ln.PlanQuality
+ }
+ 
+ // shouldPrune returns true if ln should be discarded during a prune at cutoff.
+diff --git a/internal/planrun/planrun.go b/internal/planrun/planrun.go
+index 0178338..7780e5c 100644
+--- a/internal/planrun/planrun.go
++++ b/internal/planrun/planrun.go
+@@ -128,6 +128,13 @@ type Run struct {
+ 	ConfiguredModels map[string]string `json:"configured_models,omitempty"`
+ 	ServerVersion    string            `json:"server_version,omitempty"`
+ 	PlanCall         *ToolCall         `json:"plan_call,omitempty"`
++	// Revision counts the validate_plan rounds that reviewed this run's plan:
++	// 1 when the run is minted, one more for every later round that names it.
++	Revision int `json:"revision,omitempty"`
++	// review is the caller's record of the plan's latest complete review. The
++	// store never looks inside it and hands back the same value, so the caller
++	// must treat a stored value as immutable.
++	review any
+ 	// sessions maps every session ever attached to a row to that row's Index,
+ 	// so an implementer that re-validated and carried on with its first
+ 	// session still updates its task.
+@@ -219,6 +226,7 @@ func (s *Store) CreateWithTasks(planVerdict, planQuality string, tasks []PlanTas
+ 		PlanQuality:  planQuality,
+ 		TaskCount:    len(tasks),
+ 		Tasks:        append([]PlanTask(nil), tasks...),
++		Revision:     1,
+ 		sessions:     map[string]int{},
+ 	}
+ 	s.mu.Lock()
+@@ -227,6 +235,56 @@ func (s *Store) CreateWithTasks(planVerdict, planQuality string, tasks []PlanTas
+ 	return r
+ }
+ 
++// Review returns the review record last stored on run runID and the run's
++// revision. ok is false when the run is unknown or expired; a known run that
++// has no record yet returns a nil review.
++func (s *Store) Review(runID string) (review any, revision int, ok bool) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	r, found := s.runs[runID]
++	if !found {
++		return nil, 0, false
++	}
++	r.LastAccessed = time.Now()
++	return r.review, r.Revision, true
++}
++
++// SetReview stores review on run runID. Returns false when the run is unknown.
++func (s *Store) SetReview(runID string, review any) bool {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	r, ok := s.runs[runID]
++	if !ok {
++		return false
++	}
++	r.review = review
++	r.LastAccessed = time.Now()
++	return true
++}
++
++// Revise records a later validate_plan round on run runID under one lock: the
++// run takes the round's verdict, quality, task list and review record, and
++// its revision goes up by one. Rows already attached keep their Index, so a
++// round that renumbers tasks after dispatch leaves them where they were.
++// Returns a copy of the run as this round left it, taken under the same lock,
++// and false when the run is unknown or expired.
++func (s *Store) Revise(runID, planVerdict, planQuality string, tasks []PlanTask, review any) (*Run, bool) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	r, ok := s.runs[runID]
++	if !ok {
++		return nil, false
++	}
++	r.PlanVerdict = planVerdict
++	r.PlanQuality = planQuality
++	r.TaskCount = len(tasks)
++	r.Tasks = append([]PlanTask(nil), tasks...)
++	r.Revision++
++	r.review = review
++	r.LastAccessed = time.Now()
++	return r.snapshot(), true
++}
++
+ // TaskFiles returns the paths run runID's plan lists for the task ref names,
+ // by ref.Index when it is one of the plan's tasks and else by the one heading
+ // matching ref.Title. It returns nil when the run is unknown or expired, or
+@@ -287,16 +345,23 @@ func (s *Store) Snapshot(id string) (*Run, bool) {
+ 		return nil, false
+ 	}
+ 	r.LastAccessed = time.Now()
++	return r.snapshot(), true
++}
++
++// snapshot returns the copy Snapshot hands out. The caller holds the store's
++// lock.
++func (r *Run) snapshot() *Run {
+ 	cp := *r
+ 	cp.Tasks = append([]PlanTask(nil), r.Tasks...)
+ 	cp.sessions = nil
++	cp.review = nil
+ 	cp.Rows = make([]TaskRow, len(r.Rows))
+ 	for i, row := range r.Rows {
+ 		cp.Rows[i] = cloneRow(row)
+ 	}
+ 	cp.ConfiguredModels = cloneStringMap(r.ConfiguredModels)
+ 	cp.PlanCall = cloneCall(r.PlanCall)
+-	return &cp, true
++	return &cp
+ }
+ 
+ // cloneRow deep-copies row: Severity, Categories and Codescene would
+diff --git a/scorecard/records.go b/scorecard/records.go
+index 2aa00cd..8235153 100644
+--- a/scorecard/records.go
++++ b/scorecard/records.go
+@@ -78,6 +78,13 @@ type RunLine struct {
+ 	ConfiguredModels map[string]string `json:"configured_models,omitempty"`
+ 	PlanCall         *ToolCall         `json:"plan_call,omitempty"`
+ 	Task             *TaskSnapshot     `json:"task,omitempty"`
++	// Revision and TasksCarried are set on header lines. A run has one header
++	// per validate_plan round: Revision is the round's number, starting at 1,
++	// and TasksCarried is how many of the plan's tasks that round took from
++	// the round before without a reviewer call. A header with no revision
++	// decodes as 0.
++	Revision     int `json:"revision,omitempty"`
++	TasksCarried int `json:"tasks_carried,omitempty"`
+ }
+ 
+ type OutcomeFinding struct {

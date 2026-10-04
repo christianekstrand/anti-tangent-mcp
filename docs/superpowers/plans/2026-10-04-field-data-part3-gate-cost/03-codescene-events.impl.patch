@@ -1,0 +1,457 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 2160077..52e51b5 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ - `events.jsonl` counts the `plan_run_id` criterion, so the stats show how often a `validate_task_spec` or lightweight `validate_completion` call named no plan run and therefore left its task out of the run records.
+ - `runs.jsonl` task snapshots and `plan-runs.jsonl` rows carry `over_building_ruled`: how many of the task's `validate_completion` calls had an `over_building` finding settled by an answer or a controller ruling instead of by a fix.
+ - `anti-tangent-guard` 0.7.0 gains a fourth hook, `check-progress-nudge`: a `PostToolUse` hook on `Edit`/`Write`/`NotebookEdit` that asks a task for a `check_progress` call, once, when it has made ten edits since `validate_task_spec` without one. It reads the session's own transcript (a subagent's, or the main session's), refuses nothing, and is silent with no `validate_task_spec` call and after `validate_completion`. `ANTI_TANGENT_PROGRESS_EDITS` sets the threshold and `ANTI_TANGENT_PROGRESS_GUARD=0` turns the hook off; every failure allows. Trace lines read `progress | pass|nudge|skip | edits=N`, with the subagent in the session column.
++- The server writes `codescene-events.jsonl`: one content-free record for a `validate_completion` call whose `codescene` argument reports a run (`ran: true`, or raw `analyze_change_set` output). Within a task session a record is written only when the reported result differs from the last one recorded, so retries that resend the same result count as one run; a lightweight call records every time. The record holds `ts`, `tool` (`analyze_change_set`, or `other` for any other caller-sent name), `quality_gate`, `files_analyzed`, `verdicts`, `trend`, `net_pp` and `category_counts`; `skip_reason`, `skip_evidence` and `base_ref` are never written to it.
+ 
+ ### Changed
+ 
+@@ -30,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ - The implementer protocol no longer calls `check_progress` optional and low-signal: the dispatch clause says to call it when the guard asks, or when drift is suspected.
+ - `codebase_reference_checklist` is a field of the `validate_task_spec` envelope and of the `validate_plan` response, no longer a finding. `validate_task_spec` returns one entry per claim the reviewer could not verify; `validate_plan` one entry per affected task. It does not count as a finding, as a minor on the verdict ladder, or toward `noise_cluster`, so three unverifiable references no longer lift a clean spec to `warn`. The summary block prints it under `checklist:`, `next_action` names it, and `events.jsonl` records its length as `checklist_items`. A caller that read the checklist from `findings` / `plan_findings` by its `codebase_reference_checklist` criterion must read the new field.
+ - A path a task lists in its own `**Files:**` section is not a codebase claim. `validate_plan` drops an `unverifiable_codebase_claim` whose evidence names only such paths (line anchors included) before building `codebase_reference_checklist`, and its prompt tells the reviewer not to raise one. `validate_task_spec` does the same for the paths a `**Files:**` section in `context` lists and for the paths the named plan run recorded for the task. A claim that also names a symbol, another path or a convention stays on the checklist. The plan run keeps those paths in memory only; no stats file or ledger line carries them.
++- The `PostToolUse` hook `examples/hooks/codescene-log.sh` is retired: the server writes the same file, and with both in place a run would be counted twice. The script now writes nothing and exits 0, so a `settings.json` that still registers it does not fail; remove the entry. `docs/team-setup/codescene-stats.md` describes the server-written channel and what differs from the hook's records.
+ 
+ ## [0.26.0] - 2026-09-24
+ 
+diff --git a/README.md b/README.md
+index 01597b9..645d789 100644
+--- a/README.md
++++ b/README.md
+@@ -251,9 +251,9 @@ ANTI_TANGENT_TICKET_PATTERN=             # optional regex for your tracker's key
+ #   summary.md            — latest LLM narrative (server-written)
+ #   summaries.jsonl       — narrative history (server-written)
+ #   state.json            — cadence + salt (server-written)
+-#   codescene-events.jsonl — agent-appended CodeScene Code Health records;
+-#                            read + aggregated by the server into rollup.json's
+-#                            `codescene` block (NOT written by the server)
++#   codescene-events.jsonl — one CodeScene Code Health record per run reported
++#                            to validate_completion (server-written); aggregated
++#                            into rollup.json's `codescene` block
+ #   plan-runs.jsonl        — one row per completed task plus one header line
+ #                            per run validate_plan mints (no task title),
+ #                            server-written, ONLY when ANTI_TANGENT_PLAN_LEDGER=1
+@@ -355,7 +355,7 @@ When CodeScene MCP is configured in your host alongside anti-tangent, these call
+ - `pre_commit_code_health_safeguard` mid-task — deterministic Code Health check on uncommitted/staged files. Fast, cheap, and complementary to anti-tangent's `check_progress`.
+ - `analyze_change_set` before reporting DONE — full branch-vs-base Code Health analysis. Cite the delta (e.g. `CodeScene: Code Health 9.1 → 9.1, no regression`) and any findings in the DONE summary alongside anti-tangent's `summary_block`.
+ 
+-**In-band attribution (v0.15.0+).** Pass the `analyze_change_set` result to `validate_completion` as a structured `codescene` argument instead of (or alongside) the hook below: `{ran, skip_reason, tool, quality_gate, files_analyzed, verdicts: {improved, degraded, stable}, trend, net_pp, category_counts}`, plus `skip_evidence` (v0.20.0+) and `base_ref`, the ref the analysis compared against, so `plan_run_report` counts a branch-versus-base result once. Anti-tangent attributes it to the task in `plan_run_report`, rather than only the content-free aggregate the hook writes to `codescene-events.jsonl`. Since v0.22.0 the argument also accepts `analyze_change_set`'s raw JSON (`quality_gates`, `results[]`) and reduces it server-side, and unknown keys are ignored instead of rejecting the call. `pre_commit_code_health_safeguard` sees only uncommitted changes, so after a commit it reports zero files and is not a CodeScene run of the task.
++**In-band attribution (v0.15.0+).** Pass the `analyze_change_set` result to `validate_completion` as a structured `codescene` argument: `{ran, skip_reason, tool, quality_gate, files_analyzed, verdicts: {improved, degraded, stable}, trend, net_pp, category_counts}`, plus `skip_evidence` (v0.20.0+) and `base_ref`, the ref the analysis compared against, so `plan_run_report` counts a branch-versus-base result once. Anti-tangent attributes it to the task in `plan_run_report`, and from 0.27.0 the server also appends a content-free record of each reported run to `codescene-events.jsonl` (once per distinct result within a task session), which feeds the rollup's `codescene` block. The `PostToolUse` hook that used to write that file is retired: if you registered `examples/hooks/codescene-log.sh`, remove the entry, or every run is counted twice — see [`docs/team-setup/codescene-stats.md`](docs/team-setup/codescene-stats.md). Since v0.22.0 the argument also accepts `analyze_change_set`'s raw JSON (`quality_gates`, `results[]`) and reduces it server-side, and unknown keys are ignored instead of rejecting the call. `pre_commit_code_health_safeguard` sees only uncommitted changes, so after a commit it reports zero files and is not a CodeScene run of the task.
+ 
+ **The `required` adoption check (v0.15.0+).** Set `ANTI_TANGENT_CODESCENE=required` to make the check observable server-side: a `validate_completion` call with no `codescene` argument emits a `major codescene_not_run` finding; `{"ran": false}` with no `skip_reason` also emits `codescene_not_run`; `{"ran": true, ...}` emits nothing from the adoption check. Left unset (the default), the adoption check never fires.
+ 
+diff --git a/docs/team-setup/codescene-stats.md b/docs/team-setup/codescene-stats.md
+index 031fd9e..16f699a 100644
+--- a/docs/team-setup/codescene-stats.md
++++ b/docs/team-setup/codescene-stats.md
+@@ -1,12 +1,14 @@
+ # Capturing CodeScene stats over time
+ 
+-CodeScene (the [codescene-oss MCP server](https://github.com/codescene-oss/codescene-mcp-server)) recomputes Code Health on each call but keeps **no history**, and anti-tangent's server never sees those calls (they run in the agent's MCP-client context). So to accumulate a CodeScene trend, a Claude Code **PostToolUse hook** appends one counts-only record per `analyze_change_set` run to a file in `ANTI_TANGENT_STATS_DIR`, and anti-tangent's Compactor aggregates it into `rollup.json`.
++CodeScene (the [codescene-oss MCP server](https://github.com/codescene-oss/codescene-mcp-server)) recomputes Code Health on each call but keeps **no history**, and anti-tangent's server never sees those calls (they run in the agent's MCP-client context). So the implementer hands the result over: it passes `analyze_change_set`'s output to `validate_completion` as the `codescene` argument, and the server appends one counts-only record per reported run to `codescene-events.jsonl` in `ANTI_TANGENT_STATS_DIR`. anti-tangent's Compactor aggregates that file into `rollup.json`.
+ 
+-This is active only when `ANTI_TANGENT_STATS_DIR` is set **and** CodeScene is configured in the host.
++This is active only when `ANTI_TANGENT_STATS_DIR` is set. Nothing has to be registered in the host.
+ 
+ ## What is recorded, when
+ 
+-`analyze_change_set` is the branch-vs-base Code Health review — the meaningful per-task metric. The hook fires on **every** `analyze_change_set` call and appends one record; the mid-task `pre_commit_code_health_safeguard` and `code_health_review` are **not** matched, so they are not recorded. No dedup — one record per run.
++A record is written for a `validate_completion` call that reached the reviewer and whose `codescene` argument reports a run (`ran: true`, or raw `analyze_change_set` output, which the server reduces). A skip (`ran: false`) and a call with no `codescene` argument write nothing.
++
++An implementer resends its CodeScene result on every `validate_completion` retry, and a retry is not a new run. Within one task session the server therefore writes a record only when the reported result differs from the one it last recorded for that session. A lightweight call (no `session_id`) has no session to remember that in, so each such call that reports a run writes a record.
+ 
+ `analyze_change_set` returns **categorical** output (per-file verdicts, a quality gate, and per-finding problem-points), **not** a numeric Code Health score — so the record is verdict/problem-point based, not score based.
+ 
+@@ -25,12 +27,13 @@ This is active only when `ANTI_TANGENT_STATS_DIR` is set **and** CodeScene is co
+ }
+ ```
+ 
++- `tool` is `analyze_change_set`; a `codescene` argument that names any other tool is recorded as `other`, never by the name it sent.
+ - `quality_gate` ∈ `passed | failed` (the tool's `quality_gates`).
+ - `verdicts` = per-file `verdict` tally.
+ - `net_pp` = Σ(finding `new-pp` − `old-pp`) across all findings; positive = more problem points after = worse.
+ - `trend` = sign of `net_pp`: `>0 → regression`, `<0 → improvement`, `0 → neutral`.
+-- `category_counts` = count of findings per CodeScene category (e.g. "Complex Method", "Bumpy Road Ahead").
+-- **No file paths, no code, no function names, no session id** — privacy parity with anti-tangent's own `events.jsonl`.
++- `category_counts` = count of findings per CodeScene category (e.g. "Complex Method", "Bumpy Road Ahead"). The keys are the category names the caller sent; the server keeps the 20 largest and the first 100 characters of each.
++- **No file paths, no code, no function names, no session id** — privacy parity with anti-tangent's own `events.jsonl`. The argument's free-text fields (`skip_reason`, `skip_evidence`, `base_ref`) are never written to this file.
+ 
+ ## How it surfaces
+ 
+@@ -50,51 +53,39 @@ During compaction, anti-tangent reads `codescene-events.jsonl`, aggregates the c
+ 
+ Consumers read `rollup.json` and look for the optional `codescene` block — **absence means "no CodeScene data this window," not an error.** The raw `codescene-events.jsonl` is retention-pruned by `ANTI_TANGENT_STATS_RETENTION_DAYS` alongside `events.jsonl`.
+ 
+-**Note on pruning and zero-valued fields.** The record's fields (`quality_gate`, `files_analyzed`, `verdicts`, `trend`, `net_pp`, `category_counts`) are all `omitempty` in Go. Retention-pruning rewrites `codescene-events.jsonl` by re-marshalling the records it keeps, so after a prune, a genuinely-neutral record (e.g. `net_pp: 0`, no findings) may be missing keys that a fresh record — like the example above — would still show. This round-trips losslessly in Go (the zero value and "key absent" decode to the same thing) and no consumer reads the raw file directly, so it is not a defect, but don't read a pruned record's missing key as "field never recorded."
++**Note on zero-valued fields.** The record's fields (`quality_gate`, `files_analyzed`, `verdicts`, `trend`, `net_pp`, `category_counts`) are all `omitempty` in Go, so a genuinely-neutral record (e.g. `net_pp: 0`, no findings) is missing keys that the example above shows. The zero value and "key absent" decode to the same thing and no consumer reads the raw file directly, so don't read a missing key as "field never recorded."
+ 
+-## Enable it
++## The PostToolUse hook is retired
+ 
+-The hook script ships in this repo at `examples/hooks/codescene-log.sh`. Register it as a Claude Code PostToolUse hook in `~/.claude/settings.json` (additive — keep any existing PostToolUse entries):
++Earlier versions had no server-side writer: a Claude Code `PostToolUse` hook, `examples/hooks/codescene-log.sh`, appended the record on every `analyze_change_set` call. The server writes it now, so with the hook still registered each run would be counted twice.
+ 
+-```json
+-{
+-  "hooks": {
+-    "PostToolUse": [
+-      {
+-        "matcher": "mcp__codescene__analyze_change_set",
+-        "hooks": [
+-          { "type": "command", "command": "/absolute/path/to/anti-tangent-mcp/examples/hooks/codescene-log.sh", "timeout": 10 }
+-        ]
+-      }
+-    ]
+-  }
+-}
+-```
++**If you registered that hook, remove its entry** — the `PostToolUse` block in `~/.claude/settings.json` whose matcher is `mcp__codescene__analyze_change_set`. The script still ships so that a settings file pointing at it does not fail, but it writes nothing and exits 0.
++
++Two differences from the hook's records are worth knowing when reading a trend across the change:
+ 
+-The hook reads the PostToolUse stdin (`tool_response` is a content-block array `[{type:"text", text:"<json>"}]`), extracts the `analyze_change_set` result, and appends the record. It is fire-and-forget: it always exits 0 and silently skips when `ANTI_TANGENT_STATS_DIR` is unset or the payload is unusable.
++- The hook recorded every `analyze_change_set` call, including ones made outside a task. The server records only a run that was reported to `validate_completion`.
++- A run reported by several retries of one task is one record, not one per call.
+ 
+ ## Per-task attribution: `plan-runs.jsonl`
+ 
+-The hook above records CodeScene runs anonymously and in aggregate — it cannot know which task
+-it was inside. From v0.15.0 the implementer can instead pass the `analyze_change_set` digest to
+-`validate_completion` as the `codescene` argument, which attributes it to a task exactly and
+-surfaces it in `plan_run_report`'s per-task table.
++The same `codescene` argument attributes the result to its task exactly, and surfaces it in `plan_run_report`'s per-task table.
+ 
+ Set `ANTI_TANGENT_PLAN_LEDGER=1` (with `ANTI_TANGENT_STATS_DIR`) to persist one line per
+ completed task to `plan-runs.jsonl`, so `plan_run_report` survives a server restart — the
+ in-memory plan-run store is otherwise lost like every other session state. The ledger also holds
+-one header line per run minted by `validate_plan` — run id, verdict, quality, task count, creation
+-time, no task title — pruned by its creation time, so a run no task ever attached to is still known
+-after a restart.
++a header line per run minted by `validate_plan` — run id, verdict, quality, task count, creation
++time and the plan's task headings — pruned by its creation time, so a run no task ever attached to
++is still known after a restart.
+ 
+ **Privacy: this file is different from the others.** `events.jsonl` and
+ `codescene-events.jsonl` are deliberately content-free — no titles, no paths, no code.
+-`plan-runs.jsonl` carries **task titles**. That is why it needs its own opt-in instead of
+-inheriting `ANTI_TANGENT_STATS_DIR`. `plan-runs.jsonl` **is** now subject to
++`plan-runs.jsonl` carries **task titles**, and the caller's `skip_reason`, `skip_evidence` and
++`base_ref` as sent. That is why it needs its own opt-in instead of
++inheriting `ANTI_TANGENT_STATS_DIR`. `plan-runs.jsonl` **is** subject to
+ `ANTI_TANGENT_STATS_RETENTION_DAYS` pruning, on the same retention tick as the two files above:
+ a row is dropped once its task's completion time is older than the cutoff. A row written
+ without a completion timestamp is retained rather than treated as infinitely old.
+ 
+-The two channels do not double-count: the hook writes `codescene-events.jsonl` and feeds the
+-rollup's `codescene` block; the in-band argument writes `plan-runs.jsonl` and feeds
+-`plan_run_report`. A task can use either, both, or neither.
++One argument feeds both files: `codescene-events.jsonl`, which feeds the rollup's `codescene`
++block, and `plan-runs.jsonl`, which feeds `plan_run_report`. They are different views of the same
++run, not two counts of it.
+diff --git a/examples/hooks/codescene-log.sh b/examples/hooks/codescene-log.sh
+index 8cdc9e3..db4d070 100755
+--- a/examples/hooks/codescene-log.sh
++++ b/examples/hooks/codescene-log.sh
+@@ -1,45 +1,11 @@
+ #!/usr/bin/env bash
+-# codescene-log.sh — Claude Code PostToolUse hook for mcp__codescene__analyze_change_set.
+-# Appends one counts-only record per run to $ANTI_TANGENT_STATS_DIR/codescene-events.jsonl.
+-# Fire-and-forget: always exit 0; silent skip when stats are off or the payload is unusable.
+-# Record matches internal/stats CodesceneEvent (verdicts / quality-gate / problem-points).
+-set -uo pipefail
+-
+-dir="${ANTI_TANGENT_STATS_DIR:-}"
+-[ -n "$dir" ] || exit 0
+-command -v jq >/dev/null 2>&1 || exit 0
+-
+-input=$(cat)
+-
+-# tool_response is a content-block array [{type:"text", text:"<json>"}] (observed);
+-# also handle a bare JSON string or a {content:[{text}]} wrapper defensively.
+-resp=$(printf '%s' "$input" | jq -r '
+-  .tool_response
+-  | if type=="array" then (.[0].text // "")
+-    elif type=="string" then .
+-    elif type=="object" and ((.content?|type)=="array") then (.content[0].text // "")
+-    else "" end' 2>/dev/null)
+-[ -n "$resp" ] || exit 0
+-
+-record=$(printf '%s' "$resp" | jq -c --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+-  select((.results?|type)=="array" and (.results|length) > 0) |
+-  ([.results[].findings[]? | ((.["new-pp"] // 0) - (.["old-pp"] // 0))] | add // 0) as $np |
+-  {
+-    ts: $ts,
+-    tool: "analyze_change_set",
+-    quality_gate: (.quality_gates // "unknown"),
+-    files_analyzed: (.results | length),
+-    verdicts: {
+-      improved: ([.results[] | select(.verdict=="improved")] | length),
+-      degraded: ([.results[] | select(.verdict=="degraded")] | length),
+-      stable:   ([.results[] | select(.verdict=="stable")]   | length)
+-    },
+-    trend: (if $np > 0 then "regression" elif $np < 0 then "improvement" else "neutral" end),
+-    net_pp: $np,
+-    category_counts: ([.results[].findings[]?.category] | group_by(.) | map({key: .[0], value: length}) | from_entries)
+-  }' 2>/dev/null)
+-[ -n "$record" ] || exit 0
+-
+-mkdir -p "$dir"
+-printf '%s\n' "$record" >> "$dir/codescene-events.jsonl"
++# codescene-log.sh — RETIRED. It writes nothing and always exits 0.
++#
++# The server appends the codescene-events.jsonl record itself, for every
++# validate_completion call whose `codescene` argument reports a run. A hook
++# that also wrote one would count each run twice, so this script is kept only
++# so that a settings.json still pointing at it does not fail: remove the
++# PostToolUse entry for mcp__codescene__analyze_change_set.
++# See docs/team-setup/codescene-stats.md.
++cat >/dev/null 2>&1 || true
+ exit 0
+diff --git a/internal/codescene/codescene.go b/internal/codescene/codescene.go
+index 889af34..53f85fe 100644
+--- a/internal/codescene/codescene.go
++++ b/internal/codescene/codescene.go
+@@ -4,9 +4,9 @@
+ // repository, so both internal/stats and internal/mcpsrv can depend on it
+ // without an import cycle.
+ //
+-// anti-tangent never calls CodeScene. It receives a digest a caller computed
+-// (the same reduction examples/hooks/codescene-log.sh performs) and treats it
+-// as caller-attested, exactly like pinned_by.
++// anti-tangent never calls CodeScene. It receives a digest a caller computed,
++// or the raw analyze_change_set output and reduces that itself, and treats
++// either as caller-attested, exactly like pinned_by.
+ package codescene
+ 
+ import (
+@@ -27,10 +27,10 @@ type Verdicts struct {
+ // No file paths, no code, no function names — privacy parity with the rest of
+ // the stats subsystem.
+ //
+-// Ran and SkipReason are omitempty and absent from hook-written records; the
+-// hook has no notion of a deliberate skip, so a record it wrote unmarshals
+-// with Ran=false and is distinguished from a caller-declared skip by
+-// SkipReason being empty too.
++// Ran, SkipReason, SkipEvidence and BaseRef are omitempty and absent from the
++// stats event file: every record there is a run, so a record unmarshals with
++// Ran=false and is distinguished from a caller-declared skip by SkipReason
++// being empty too.
+ type Digest struct {
+ 	Ran            bool           `json:"ran,omitempty" jsonschema:"True when a CodeScene analysis of the task's changes actually ran."`
+ 	SkipReason     string         `json:"skip_reason,omitempty" jsonschema:"Why the analysis did not run, when ran is false. The first 300 characters are kept."`
+@@ -102,8 +102,8 @@ func hasNonNull(present map[string]json.RawMessage, key string) bool {
+ }
+ 
+ // UnmarshalJSON accepts both the digest shape and CodeScene's raw
+-// analyze_change_set output, reducing quality_gates and results[] the way
+-// examples/hooks/codescene-log.sh does. A digest field present in the input
++// analyze_change_set output, reducing quality_gates and results[] to the
++// digest's counts. A digest field present in the input
+ // always wins over the value derived from raw keys. Unknown keys are ignored,
+ // and each raw key is decoded on its own, so one of the wrong type is ignored
+ // without disturbing the other: the argument is optional, and a malformed side
+diff --git a/internal/mcpsrv/codescene_event.go b/internal/mcpsrv/codescene_event.go
+new file mode 100644
+index 0000000..5921271
+--- /dev/null
++++ b/internal/mcpsrv/codescene_event.go
+@@ -0,0 +1,39 @@
++package mcpsrv
++
++import (
++	"crypto/sha256"
++	"encoding/hex"
++	"encoding/json"
++
++	"github.com/patiently/anti-tangent-mcp/internal/codescene"
++	"github.com/patiently/anti-tangent-mcp/internal/stats"
++)
++
++// codesceneRunKey identifies the run d reports by what the event file would
++// hold for it, or returns "" when d reports no run. Two calls that send the
++// same result share a key.
++func codesceneRunKey(d *codescene.Digest) string {
++	if d == nil || !d.Ran {
++		return ""
++	}
++	b, err := json.Marshal(stats.RunRecord(*d))
++	if err != nil {
++		return ""
++	}
++	sum := sha256.Sum256(b)
++	return hex.EncodeToString(sum[:8])
++}
++
++// recordCodesceneRun writes the run d reports to the stats event file, unless
++// d reports none or lastKey says the session's previous call already recorded
++// this result: an implementer resends its CodeScene result on every
++// validate_completion retry, and each retry is not a new run. It returns the
++// key to keep on the session, "" when there is none to keep.
++func (h *handlers) recordCodesceneRun(d *codescene.Digest, lastKey string) string {
++	key := codesceneRunKey(d)
++	if key == "" || key == lastKey {
++		return key
++	}
++	h.deps.Stats.RecordCodescene(*d)
++	return key
++}
+diff --git a/internal/mcpsrv/handlers.go b/internal/mcpsrv/handlers.go
+index 209f538..3ae567f 100644
+--- a/internal/mcpsrv/handlers.go
++++ b/internal/mcpsrv/handlers.go
+@@ -1939,6 +1939,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
+ 	var review completionReview
+ 	var lightweightMalformedRulingIDs []string
+ 	skipReported, overBuildingAnswered := false, false
++	var codesceneEventKey string
+ 	if lightweight {
+ 		// Synthesize a minimal spec for the reviewer. No session is created.
+ 		spec = session.TaskSpec{
+@@ -1969,6 +1970,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
+ 		review = buildCompletionReview(state, state.PreFindings, knownSessionFindings(state), responses, rulingArgs)
+ 		skipReported = state.CodesceneSkipReported
+ 		overBuildingAnswered = state.OverBuildingAnswered
++		codesceneEventKey = state.CodesceneEventKey
+ 	}
+ 
+ 	// 8b. Built only once no rejection can follow: evidenceCacheKey leaves
+@@ -2106,6 +2108,9 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
+ 		}
+ 	}
+ 
++	// A lightweight call has no session to remember a recorded run in, so it
++	// records the run on every call.
++	codesceneEventKey = h.recordCodesceneRun(args.Codescene, codesceneEventKey)
+ 	if !lightweight {
+ 		update := session.ReviewUpdate{
+ 			IssuedIDs:             envelopeIDs(env),
+@@ -2113,6 +2118,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
+ 			Escalated:             env.Escalate,
+ 			CodesceneSkipReported: evidencedSkip,
+ 			OverBuildingAnswered:  answersOverBuilding(review.prior),
++			CodesceneEventKey:     codesceneEventKey,
+ 		}
+ 		// A truncated review keeps the prior findings of the last complete one:
+ 		// its own list is incomplete, and a finding lost to truncation would
+diff --git a/internal/session/session.go b/internal/session/session.go
+index 61c167d..e50983e 100644
+--- a/internal/session/session.go
++++ b/internal/session/session.go
+@@ -102,6 +102,10 @@ type Session struct {
+ 	// cleared. Nothing the implementer does clears that finding, so it is
+ 	// returned once.
+ 	CodesceneSkipReported bool
++	// CodesceneEventKey identifies the CodeScene run most recently written to
++	// the stats event file for this session, so a call that sends the same
++	// result again does not record the run a second time.
++	CodesceneEventKey string
+ 	// OverBuildingAnswered is set once a validate_completion on the session
+ 	// carried a finding_responses answer to an over_building finding, and
+ 	// never cleared: an answer is sent once, and must still stand on the
+diff --git a/internal/session/store.go b/internal/session/store.go
+index d13576f..9162bcb 100644
+--- a/internal/session/store.go
++++ b/internal/session/store.go
+@@ -112,6 +112,8 @@ type ReviewState struct {
+ 	CodesceneSkipReported bool
+ 	// OverBuildingAnswered mirrors Session.OverBuildingAnswered.
+ 	OverBuildingAnswered bool
++	// CodesceneEventKey mirrors Session.CodesceneEventKey.
++	CodesceneEventKey string
+ }
+ 
+ // ReviewState returns a copy of the session's review state.
+@@ -133,6 +135,7 @@ func (s *Store) ReviewState(id string) (ReviewState, bool) {
+ 
+ 		CodesceneSkipReported: sess.CodesceneSkipReported,
+ 		OverBuildingAnswered:  sess.OverBuildingAnswered,
++		CodesceneEventKey:     sess.CodesceneEventKey,
+ 	}
+ 	for k := range sess.IssuedIDs {
+ 		st.IssuedIDs[k] = true
+@@ -162,6 +165,8 @@ type ReviewUpdate struct {
+ 	CodesceneSkipReported bool
+ 	// OverBuildingAnswered sets the session's flag; false leaves it as it is.
+ 	OverBuildingAnswered bool
++	// CodesceneEventKey replaces the session's key; "" leaves it as it is.
++	CodesceneEventKey string
+ }
+ 
+ // ApplyReview merges u into the session under one lock, into the session as
+@@ -203,6 +208,9 @@ func (s *Store) ApplyReview(id string, u ReviewUpdate) bool {
+ 	if u.OverBuildingAnswered {
+ 		sess.OverBuildingAnswered = true
+ 	}
++	if u.CodesceneEventKey != "" {
++		sess.CodesceneEventKey = u.CodesceneEventKey
++	}
+ 	sess.LastAccessed = time.Now()
+ 	return true
+ }
+diff --git a/internal/stats/codescene.go b/internal/stats/codescene.go
+index 093c36f..bf6f8bf 100644
+--- a/internal/stats/codescene.go
++++ b/internal/stats/codescene.go
+@@ -14,10 +14,10 @@ const codesceneFile = "codescene-events.jsonl"
+ // compiling; the canonical definition lives in internal/codescene.
+ type Verdicts = codescene.Verdicts
+ 
+-// CodesceneEvent is the per-run record the hook appends (see
+-// docs/team-setup/codescene-stats.md). anti-tangent reads this file and, from
+-// v0.15.0, may also receive the same shape in band as the validate_completion
+-// `codescene` argument. Counts + metadata only — no file paths.
++// CodesceneEvent is one CodeScene run as codescene-events.jsonl holds it (see
++// docs/team-setup/codescene-stats.md). The server appends one for a
++// validate_completion call whose `codescene` argument reports a run. Counts
++// and metadata only: no file path, no ref name, no skip text.
+ // analyze_change_set is categorical (verdicts / quality-gate / problem-points),
+ // not a 1-10 score.
+ type CodesceneEvent struct {
+@@ -62,6 +62,43 @@ type CodesceneRollup struct {
+ 	WindowEnd         time.Time      `json:"window_end"`
+ }
+ 
++// codesceneRunTool is the one tool name a run record carries.
++const codesceneRunTool = "analyze_change_set"
++
++// RunRecord reduces d to the fields a CodesceneEvent may hold. The caller's
++// free text — skip reason, skip evidence, base ref — is left out, and so is
++// Ran: every record is a run. Tool is caller text too, so a record names the
++// tool only when it is the expected one, and says "other" for anything else.
++func RunRecord(d codescene.Digest) codescene.Digest {
++	tool := codesceneRunTool
++	if d.Tool != "" && d.Tool != codesceneRunTool {
++		tool = "other"
++	}
++	return codescene.Digest{
++		Tool:           tool,
++		QualityGate:    d.QualityGate,
++		FilesAnalyzed:  d.FilesAnalyzed,
++		Verdicts:       d.Verdicts,
++		Trend:          d.Trend,
++		NetPP:          d.NetPP,
++		CategoryCounts: d.CategoryCounts,
++	}
++}
++
++// RecordCodescene appends one CodeScene run, reduced by RunRecord, to
++// codescene-events.jsonl. Best-effort, and safe on a nil Recorder.
++func (r *Recorder) RecordCodescene(d codescene.Digest) {
++	if r == nil {
++		return
++	}
++	ev := CodesceneEvent{Ts: r.clock().Truncate(time.Second), Digest: RunRecord(d)}
++	r.mu.Lock()
++	defer r.mu.Unlock()
++	if err := appendJSONL(r.dir, codesceneFile, ev); err != nil {
++		r.logger.Warn("stats codescene append failed", "err", err)
++	}
++}
++
+ func readCodescene(dir string) ([]CodesceneEvent, error) {
+ 	return readJSONL[CodesceneEvent](dir, codesceneFile)
+ }
