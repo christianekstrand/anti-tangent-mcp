@@ -473,3 +473,27 @@ func TestLedger_HeaderAfterRowsStillCarriesThePlansTasks(t *testing.T) {
 	assert.False(t, got.CreatedAt.IsZero())
 	require.Len(t, got.Rows, 1)
 }
+
+func TestLedger_LoadTakesTheLatestRoundsHeader(t *testing.T) {
+	dir := t.TempDir()
+	l := &Ledger{Dir: dir}
+	s := NewStore(time.Hour)
+	run := s.CreateWithTasks("warn", "actionable", []PlanTask{{Index: 1, Title: "Task 1: A"}})
+	require.NoError(t, l.AppendHeader(run))
+	row, ok := s.Attach(run.ID, "sess-1", TaskRef{Index: 1}, "pass")
+	require.True(t, ok)
+	require.NoError(t, l.Append(run, row))
+	revised, ok := s.Revise(run.ID, "pass", "rigorous", []PlanTask{{Index: 1, Title: "Task 1: A"}, {Index: 2, Title: "Task 2: B"}}, nil)
+	require.True(t, ok)
+	require.NoError(t, l.AppendHeader(revised))
+
+	got, ok := l.Load(run.ID)
+	require.True(t, ok)
+	assert.Equal(t, 2, got.Revision)
+	assert.Equal(t, "pass", got.PlanVerdict)
+	assert.Equal(t, 2, got.TaskCount)
+	require.Len(t, got.Tasks, 2)
+	assert.Equal(t, "Task 2: B", got.Tasks[1].Title)
+	require.Len(t, got.Rows, 1)
+	assert.Equal(t, run.CreatedAt.UTC(), got.CreatedAt.UTC())
+}

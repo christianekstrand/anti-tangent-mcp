@@ -62,6 +62,9 @@ type ledgerLine struct {
 	// WrittenAt is set on task-row lines: when the line was appended. Prune
 	// keys a row that has not completed on it.
 	WrittenAt time.Time `json:"written_at,omitzero"`
+	// Revision is set on header lines: which validate_plan round wrote the
+	// line. A run has one header line per round.
+	Revision int `json:"revision,omitempty"`
 }
 
 // ledgerHeaderLine is the on-disk shape of a header. It is marshalled from its
@@ -77,6 +80,7 @@ type ledgerHeaderLine struct {
 	Header          bool       `json:"header"`
 	CreatedAt       time.Time  `json:"created_at"`
 	Tasks           []PlanTask `json:"tasks,omitempty"`
+	Revision        int        `json:"revision,omitempty"`
 }
 
 // Ledger appends a task row each time one changes to plan-runs.jsonl, plus
@@ -133,9 +137,10 @@ func (l *Ledger) Append(run *Run, row TaskRow) error {
 	return l.appendLine(b)
 }
 
-// AppendHeader records a run when validate_plan mints it, so a run that no
-// task was ever attached to is still known to Load. It carries the plan's
-// task headings, which the report lists for tasks never dispatched.
+// AppendHeader records a run when validate_plan mints it, and again for
+// every later round that revises it, so a run that no task was ever attached
+// to is still known to Load. It carries the plan's task headings, which the
+// report lists for tasks never dispatched.
 func (l *Ledger) AppendHeader(run *Run) error {
 	if l == nil || l.Dir == "" {
 		return nil
@@ -143,6 +148,7 @@ func (l *Ledger) AppendHeader(run *Run) error {
 	b, err := json.Marshal(ledgerHeaderLine{
 		HeaderPlanRunID: run.ID, PlanVerdict: run.PlanVerdict, PlanQuality: run.PlanQuality,
 		TaskCount: run.TaskCount, Header: true, CreatedAt: run.CreatedAt.UTC(), Tasks: run.Tasks,
+		Revision: run.Revision,
 	})
 	if err != nil {
 		return err
@@ -236,20 +242,24 @@ func (l *Ledger) Load(planRunID string) (*Run, bool) {
 	return run, true
 }
 
-// mergeHeaderLine folds header line ln into run, field by field, so Load
-// gets the header's CreatedAt, Tasks and TaskCount regardless of whether the
-// header line is read before or after the task rows that reference the same
-// run.
+// mergeHeaderLine folds header line ln into run, so Load gets the header's
+// CreatedAt, Tasks and TaskCount regardless of whether the header line is
+// read before or after the task rows that reference the same run. A run
+// revised by a later validate_plan round has several header lines: the one
+// with the highest revision describes the plan as it stands, and CreatedAt
+// stays the earliest.
 func mergeHeaderLine(run *Run, ln ledgerLine) {
-	if run.CreatedAt.IsZero() {
+	if run.CreatedAt.IsZero() || (!ln.CreatedAt.IsZero() && ln.CreatedAt.Before(run.CreatedAt)) {
 		run.CreatedAt = ln.CreatedAt
 	}
-	if run.Tasks == nil {
-		run.Tasks = ln.Tasks
+	if run.Tasks != nil && ln.Revision < run.Revision {
+		return
 	}
-	if run.TaskCount == 0 {
-		run.TaskCount = ln.TaskCount
-	}
+	run.Revision = ln.Revision
+	run.Tasks = ln.Tasks
+	run.TaskCount = ln.TaskCount
+	run.PlanVerdict = ln.PlanVerdict
+	run.PlanQuality = ln.PlanQuality
 }
 
 // shouldPrune returns true if ln should be discarded during a prune at cutoff.

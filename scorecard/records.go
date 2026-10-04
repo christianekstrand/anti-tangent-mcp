@@ -78,6 +78,13 @@ type RunLine struct {
 	ConfiguredModels map[string]string `json:"configured_models,omitempty"`
 	PlanCall         *ToolCall         `json:"plan_call,omitempty"`
 	Task             *TaskSnapshot     `json:"task,omitempty"`
+	// Revision and TasksCarried are set on header lines. A run has one header
+	// per validate_plan round: Revision is the round's number, starting at 1,
+	// and TasksCarried is how many of the plan's tasks that round took from
+	// the round before without a reviewer call. A header with no revision
+	// decodes as 0.
+	Revision     int `json:"revision,omitempty"`
+	TasksCarried int `json:"tasks_carried,omitempty"`
 }
 
 type OutcomeFinding struct {

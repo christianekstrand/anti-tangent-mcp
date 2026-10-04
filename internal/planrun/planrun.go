@@ -128,6 +128,13 @@ type Run struct {
 	ConfiguredModels map[string]string `json:"configured_models,omitempty"`
 	ServerVersion    string            `json:"server_version,omitempty"`
 	PlanCall         *ToolCall         `json:"plan_call,omitempty"`
+	// Revision counts the validate_plan rounds that reviewed this run's plan:
+	// 1 when the run is minted, one more for every later round that names it.
+	Revision int `json:"revision,omitempty"`
+	// review is the caller's record of the plan's latest complete review. The
+	// store never looks inside it and hands back the same value, so the caller
+	// must treat a stored value as immutable.
+	review any
 	// sessions maps every session ever attached to a row to that row's Index,
 	// so an implementer that re-validated and carried on with its first
 	// session still updates its task.
@@ -219,12 +226,63 @@ func (s *Store) CreateWithTasks(planVerdict, planQuality string, tasks []PlanTas
 		PlanQuality:  planQuality,
 		TaskCount:    len(tasks),
 		Tasks:        append([]PlanTask(nil), tasks...),
+		Revision:     1,
 		sessions:     map[string]int{},
 	}
 	s.mu.Lock()
 	s.runs[r.ID] = r
 	s.mu.Unlock()
 	return r
+}
+
+// Review returns the review record last stored on run runID and the run's
+// revision. ok is false when the run is unknown or expired; a known run that
+// has no record yet returns a nil review.
+func (s *Store) Review(runID string) (review any, revision int, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, found := s.runs[runID]
+	if !found {
+		return nil, 0, false
+	}
+	r.LastAccessed = time.Now()
+	return r.review, r.Revision, true
+}
+
+// SetReview stores review on run runID. Returns false when the run is unknown.
+func (s *Store) SetReview(runID string, review any) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return false
+	}
+	r.review = review
+	r.LastAccessed = time.Now()
+	return true
+}
+
+// Revise records a later validate_plan round on run runID under one lock: the
+// run takes the round's verdict, quality, task list and review record, and
+// its revision goes up by one. Rows already attached keep their Index, so a
+// round that renumbers tasks after dispatch leaves them where they were.
+// Returns a copy of the run as this round left it, taken under the same lock,
+// and false when the run is unknown or expired.
+func (s *Store) Revise(runID, planVerdict, planQuality string, tasks []PlanTask, review any) (*Run, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return nil, false
+	}
+	r.PlanVerdict = planVerdict
+	r.PlanQuality = planQuality
+	r.TaskCount = len(tasks)
+	r.Tasks = append([]PlanTask(nil), tasks...)
+	r.Revision++
+	r.review = review
+	r.LastAccessed = time.Now()
+	return r.snapshot(), true
 }
 
 // TaskFiles returns the paths run runID's plan lists for the task ref names,
@@ -287,16 +345,23 @@ func (s *Store) Snapshot(id string) (*Run, bool) {
 		return nil, false
 	}
 	r.LastAccessed = time.Now()
+	return r.snapshot(), true
+}
+
+// snapshot returns the copy Snapshot hands out. The caller holds the store's
+// lock.
+func (r *Run) snapshot() *Run {
 	cp := *r
 	cp.Tasks = append([]PlanTask(nil), r.Tasks...)
 	cp.sessions = nil
+	cp.review = nil
 	cp.Rows = make([]TaskRow, len(r.Rows))
 	for i, row := range r.Rows {
 		cp.Rows[i] = cloneRow(row)
 	}
 	cp.ConfiguredModels = cloneStringMap(r.ConfiguredModels)
 	cp.PlanCall = cloneCall(r.PlanCall)
-	return &cp, true
+	return &cp
 }
 
 // cloneRow deep-copies row: Severity, Categories and Codescene would
