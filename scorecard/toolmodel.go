@@ -79,6 +79,7 @@ type tmCtx struct {
 // pooled view's accumulators merge every publisher's calls for the same tool
 // and model.
 func (c *tmCtx) acc(tool, model string) *tmAcc {
+	model = NormalizeModel(model)
 	k := tmKey{tool: tool, model: model}
 	if c.byPublisher {
 		k.publisher = c.r.key.publisher

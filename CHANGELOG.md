@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `validate_completion` now asks the reviewer to look for defects in the submitted change (wrong results on boundary inputs, dropped failures, unprotected shared state, unreleased resources, one-sided caller/callee changes) and for tests that would not fail if the behaviour broke, reported as `correctness` and `test_adequacy`. A finding of either kind can be critical or major, so it moves the verdict; the reviewer is told to report only what the submitted evidence shows.
+- Scorecard cohorts key on a normalised model id: lower-cased, trimmed, and without a trailing `-YYYYMMDD` date stamp, so `claude-haiku-4-5` and `claude-haiku-4-5-20251001` are one cohort. Stored records are unchanged; the normalisation is applied when they are read.
+- A cohort's regression baseline is now the most recent earlier cohort with the same review model and implementer model, falling back to the most recent earlier cohort of any key when there is none.
 
 ## [0.26.0] - 2026-09-24
 

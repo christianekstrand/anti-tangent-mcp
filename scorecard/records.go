@@ -8,6 +8,7 @@ package scorecard
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -117,6 +118,17 @@ func NormalizeCategory(s string) string {
 		return s
 	}
 	return string([]rune(s)[:40])
+}
+
+var modelDateSuffix = regexp.MustCompile(`-\d{8}$`)
+
+// NormalizeModel is the form a model id takes in every cohort key:
+// lower-cased, trimmed, and without one trailing -YYYYMMDD date stamp, so a
+// dated id and its undated alias land in the same cohort. It is applied when
+// records are read, never when they are written, so records stored before it
+// existed group the same way as new ones.
+func NormalizeModel(s string) string {
+	return modelDateSuffix.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "")
 }
 
 // MaxModelRunes bounds ReviewerModel and ImplementerModel.Model: both are

@@ -140,16 +140,18 @@ func groupTasks(runs map[runKey]*run, keyOf func(*run, *task) CohortKey, byPubli
 	return groups
 }
 
-// assignRegression compares each group with its baseline: the group of the
-// same source and publisher whose last scored task came most recently before
-// this group's first. Any key dimension may differ, since a changed model or
-// version is what is being measured. groups arrives sorted, and the strict
-// After below keeps the first-sorted group on a tie. Only a disjoint interval
-// counts as a regression, and only once both sides have minRuns runs.
+// assignRegression compares each group with its baseline. Candidates are the
+// groups of the same source and publisher whose last scored task came before
+// this group's first. Among them, the most recent one reviewed and implemented
+// by the same models is the baseline, so a release is measured against the
+// same models on the release before; when no candidate shares both models,
+// the most recent candidate of any key is used. groups arrives sorted, and the
+// strict After below keeps the first-sorted group on a tie. Only a disjoint
+// interval counts as a regression, and only once both sides have minRuns runs.
 func assignRegression(groups []Group, minRuns int) {
 	for i := range groups {
 		g := &groups[i]
-		var base *Group
+		var base, sameModels *Group
 		for j := range groups {
 			c := &groups[j]
 			if j == i || c.Source != g.Source || c.Publisher != g.Publisher || !c.last.Before(g.first) {
@@ -158,6 +160,13 @@ func assignRegression(groups []Group, minRuns int) {
 			if base == nil || c.last.After(base.last) {
 				base = c
 			}
+			if c.Key.ReviewModel == g.Key.ReviewModel && c.Key.ImplementerModel == g.Key.ImplementerModel &&
+				(sameModels == nil || c.last.After(sameModels.last)) {
+				sameModels = c
+			}
+		}
+		if sameModels != nil {
+			base = sameModels
 		}
 		if base == nil {
 			g.Regression = RegressionNoBaseline

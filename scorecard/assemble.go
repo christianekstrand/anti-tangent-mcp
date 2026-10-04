@@ -89,8 +89,10 @@ func (t *task) latestCall(tool string) (ToolCall, bool) {
 }
 
 func (t *task) reviewModel() string {
-	if c, ok := t.latestCall("validate_completion"); ok && c.Model != "" {
-		return c.Model
+	if c, ok := t.latestCall("validate_completion"); ok {
+		if m := NormalizeModel(c.Model); m != "" {
+			return m
+		}
 	}
 	return "unknown"
 }
@@ -107,8 +109,11 @@ func (t *task) serverVersion() string {
 func (r *run) implementerModel(index int) string {
 	for _, src := range Sources {
 		for _, m := range r.outcomes[src].ImplementerModels {
-			if m.TaskIndex == index && m.Model != "" {
-				return m.Model
+			if m.TaskIndex != index {
+				continue
+			}
+			if model := NormalizeModel(m.Model); model != "" {
+				return model
 			}
 		}
 	}
