@@ -181,9 +181,9 @@ func (c *carriedMinors) drop(id string) bool {
 // count. A minor takes an answered prior of any severity at most once, so a
 // fingerprint shared by several new minors cannot hide them all; critical and
 // major findings may always take it. An unanswered critical or major repeat
-// stays unmarked: it is an open finding, not a dispute. Returns the prior IDs the critical and major repeats
-// raise again, each once, in order, and clears same_as on every finding once
-// read.
+// stays unmarked: it is an open finding, not a dispute. Returns the prior IDs
+// the critical and major repeats raise again, each once, in order, and clears
+// same_as on every finding once read.
 func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[string]bool) []string {
 	answered := map[string]bool{}
 	answeredByFingerprint := map[string]string{}
