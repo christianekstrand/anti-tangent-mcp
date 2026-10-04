@@ -351,3 +351,42 @@ func canonRefPath(p string) string {
 	}
 	return path.Clean(p)
 }
+
+// listedBulletRe matches any labelled bullet of a **Files:** section —
+// "- Test: `a_test.go`" as well as the Create/Modify/Delete bullets — and
+// captures what follows the label.
+var listedBulletRe = regexp.MustCompile("^\\s*[-*]\\s+[^:`]+:\\s*(.+)$")
+
+// ListedPaths returns every path a task body's **Files:** section lists,
+// whatever the bullet's label, each once and in order of first appearance.
+// The section's bounds are FileRefs': it starts at the heading and stops at
+// the first line that is neither a bullet nor blank.
+func ListedPaths(body string) []string {
+	var out []string
+	seen := map[string]bool{}
+	inSection := false
+	for _, line := range strings.Split(body, "\n") {
+		if !inSection {
+			inSection = filesHeadingRe.MatchString(line)
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "- ") && !strings.HasPrefix(trimmed, "* ") {
+			break
+		}
+		m := listedBulletRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		for _, p := range refPaths(m[1]) {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}

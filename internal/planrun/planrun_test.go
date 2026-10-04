@@ -2,7 +2,10 @@ package planrun
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -426,4 +429,26 @@ func TestLatest_NilStore(t *testing.T) {
 	var s *Store
 	_, ok := s.Latest()
 	assert.False(t, ok)
+}
+
+func TestTaskFiles_ByIndexThenByTitleAndNeverOnDisk(t *testing.T) {
+	s := NewStore(time.Hour)
+	run := s.CreateWithTasks("pass", "rigorous", []PlanTask{
+		{Index: 1, Title: "Task 1: Store", Files: []string{"pkg/store.go"}},
+		{Index: 2, Title: "Task 2: Cache", Files: []string{"pkg/cache.go"}},
+	})
+
+	assert.Equal(t, []string{"pkg/cache.go"}, s.TaskFiles(run.ID, TaskRef{Index: 2, Title: "store"}), "an index in range wins over the title")
+	got := s.TaskFiles(run.ID, TaskRef{Title: "task 1:  store"})
+	require.Equal(t, []string{"pkg/store.go"}, got, "a title matches its heading")
+	got[0] = "changed"
+	assert.Equal(t, []string{"pkg/store.go"}, s.TaskFiles(run.ID, TaskRef{Index: 1}), "TaskFiles returns a copy")
+	assert.Nil(t, s.TaskFiles(run.ID, TaskRef{Index: 9, Title: "nothing"}), "an unmatched task lists nothing")
+	assert.Nil(t, s.TaskFiles("pr_unknown", TaskRef{Index: 1}), "an unknown run lists nothing")
+
+	dir := t.TempDir()
+	require.NoError(t, (&Ledger{Dir: dir}).AppendHeader(run))
+	b, err := os.ReadFile(filepath.Join(dir, ledgerFile))
+	require.NoError(t, err)
+	assert.False(t, strings.Contains(string(b), "pkg/"), "the ledger header must not carry file paths: %s", b)
 }

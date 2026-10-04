@@ -37,8 +37,10 @@ func splitTaskUnverifiable(findings []verdict.Finding) (kept []verdict.Finding, 
 // stripTaskUnverifiableFindings removes every task-level
 // unverifiable_codebase_claim finding and returns one checklist line per
 // affected task, with that task's evidence joined by "; " and truncated at
-// rollupEvidencePerTaskMax. Reviewer-emitted plan-level unverifiable findings
-// stay where they are. Each task's Findings is reassigned to a fresh slice.
+// rollupEvidencePerTaskMax. A claim that only names paths the task's own
+// Files: section lists is dropped and reaches no line. Reviewer-emitted
+// plan-level unverifiable findings stay where they are. Each task's Findings
+// is reassigned to a fresh slice.
 //
 // The label numbers by the PARSED plan position, never by the reviewer's own
 // task_index: validateChunkIdentity checks a chunk's titles and order but not
@@ -52,13 +54,18 @@ func stripTaskUnverifiableFindings(pr *verdict.PlanResult, tasks []planparser.Ra
 	parsedIdx := parsedTaskIndexes(pr.Tasks, tasks)
 	var lines []string
 	for i := range pr.Tasks {
-		kept, perTask := splitTaskUnverifiable(pr.Tasks[i].Findings)
+		idx := parsedIdx[i]
+		findings := pr.Tasks[i].Findings
+		if idx >= 0 {
+			findings = dropListedFileClaims(findings, planparser.ListedPaths(tasks[idx].Body))
+		}
+		kept, perTask := splitTaskUnverifiable(findings)
 		pr.Tasks[i].Findings = kept
 		if len(perTask) == 0 {
 			continue
 		}
 		taskNum := i + 1
-		if idx := parsedIdx[i]; idx >= 0 {
+		if idx >= 0 {
 			taskNum = idx + 1
 		}
 		lines = append(lines, fmt.Sprintf("Task %d: %s",

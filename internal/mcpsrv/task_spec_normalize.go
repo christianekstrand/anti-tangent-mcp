@@ -3,8 +3,22 @@ package mcpsrv
 import (
 	"strings"
 
+	"github.com/patiently/anti-tangent-mcp/internal/planparser"
+	"github.com/patiently/anti-tangent-mcp/internal/planrun"
 	"github.com/patiently/anti-tangent-mcp/internal/verdict"
 )
+
+// taskSpecListedFiles returns the paths the task's own Files: section lists:
+// the ones a Files: section in the caller's Context names, and the ones the
+// named plan run recorded for the task from the plan.
+func (h *handlers) taskSpecListedFiles(args ValidateTaskSpecArgs) []string {
+	files := planparser.ListedPaths(args.Context)
+	if args.PlanRunID == "" {
+		return files
+	}
+	ref := planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle}
+	return append(files, h.deps.PlanRuns.TaskFiles(args.PlanRunID, ref)...)
+}
 
 // taskSpecChecklistNextAction is appended to validate_task_spec's next_action
 // when the envelope carries a codebase_reference_checklist.

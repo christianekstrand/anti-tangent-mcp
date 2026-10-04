@@ -269,7 +269,7 @@ func planRunTasks(pr verdict.PlanResult, tasks []planparser.RawTask) []planrun.P
 	if len(tasks) > 0 {
 		out := make([]planrun.PlanTask, len(tasks))
 		for i, t := range tasks {
-			out[i] = planrun.PlanTask{Index: i + 1, Title: t.Title}
+			out[i] = planrun.PlanTask{Index: i + 1, Title: t.Title, Files: planparser.ListedPaths(t.Body)}
 		}
 		return out
 	}

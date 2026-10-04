@@ -192,6 +192,7 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 	result := out.Result
 	result.Findings = suppressTestabilityExtractionScopeDrift(result.Findings, inputs.TestabilityExtractions)
 	result.Findings = suppressUnverifiableCodebaseClaim(result.Findings, inputs.ControllerVerifiedReferences)
+	result.Findings = dropListedFileClaims(result.Findings, h.taskSpecListedFiles(args))
 	var checklist []string
 	result.Findings, checklist = splitTaskSpecChecklist(result.Findings)
 	result.Findings = withServerFindings(cc.Clamp, result.Findings, out.Server)

@@ -84,6 +84,9 @@ type TaskRow struct {
 type PlanTask struct {
 	Index int    `json:"index"`
 	Title string `json:"title"`
+	// Files are the paths the task's own Files: section lists. They are kept
+	// in memory only, so the ledger header never carries them.
+	Files []string `json:"-"`
 }
 
 // TaskRef is what a call says about the plan task it belongs to.
@@ -222,6 +225,29 @@ func (s *Store) CreateWithTasks(planVerdict, planQuality string, tasks []PlanTas
 	s.runs[r.ID] = r
 	s.mu.Unlock()
 	return r
+}
+
+// TaskFiles returns the paths run runID's plan lists for the task ref names,
+// by ref.Index when it is one of the plan's tasks and else by the one heading
+// matching ref.Title. It returns nil when the run is unknown or expired, or
+// ref names no plan task.
+func (s *Store) TaskFiles(runID string, ref TaskRef) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return nil
+	}
+	index := ref.Index
+	if index < 1 || index > len(r.Tasks) {
+		index = r.taskByTitle(titleKey(ref.Title))
+	}
+	for _, t := range r.Tasks {
+		if t.Index == index {
+			return append([]string(nil), t.Files...)
+		}
+	}
+	return nil
 }
 
 // PlanTaskCount returns how many tasks run runID's plan has, and false when
