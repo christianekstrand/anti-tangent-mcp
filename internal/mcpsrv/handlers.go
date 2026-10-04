@@ -375,6 +375,9 @@ type statParams struct {
 
 	tasksTotal      int
 	tasksWithHeader int
+	// tasksCarried is how many tasks a validate_plan round took from an
+	// earlier round, or from the pass cache, without a reviewer call.
+	tasksCarried int
 	// checklistItems is how many codebase_reference_checklist entries the
 	// call returned.
 	checklistItems int
@@ -405,6 +408,7 @@ func (h *handlers) recordStat(p statParams) {
 		TasksTotal:      p.tasksTotal,
 		TasksWithHeader: p.tasksWithHeader,
 		ChecklistItems:  p.checklistItems,
+		TasksCarried:    p.tasksCarried,
 	})
 }
 
@@ -1192,6 +1196,7 @@ type ValidatePlanArgs struct {
 	ContextPaths                 []string              `json:"context_paths,omitempty" jsonschema:"Absolute paths to source files the plan makes claims about, at most 50. Each file is sent in full to the reviewer vendor on every reviewer call of the round, so attach only files the plan touches and never secrets. With ANTI_TANGENT_PLAN_ROOTS set they must be under those roots."`
 	RepoRoot                     string                `json:"repo_root,omitempty" jsonschema:"Absolute path to the repository root; enables the disk tier of the Create/Modify consistency check. With ANTI_TANGENT_PLAN_ROOTS set it must be under those roots."`
 	ControllerRulings            []ControllerRulingArg `json:"controller_rulings,omitempty" jsonschema:"Rulings you made on findings from earlier rounds, resent every round. Each waives every finding with the same id, ignoring any -n suffix; only an id's shape is checked. At most 50 entries of at most 2000 characters each."`
+	PlanRunID                    string                `json:"plan_run_id,omitempty" jsonschema:"The plan_run_id an earlier validate_plan round on this plan returned. The round then keeps that id, sends the reviewer only the tasks whose text changed, carries the other tasks' results forward, and re-runs the plan-level pass only when the plan text changed. A round in which nothing changed makes no reviewer call. An unknown or expired id does not fail the call: the whole plan is reviewed under a new run and a finding says so. Leave it out to force a full review."`
 	ControllerVerifiedReferences []string              `json:"controller_verified_references,omitempty" jsonschema:"Paths, symbols, line anchors or commands you already verified; a matching unverifiable_codebase_claim finding is suppressed by substring match before the rolled-up checklist is built. At most 200 entries of at most 500 characters each."`
 }
 
@@ -1210,7 +1215,9 @@ func validatePlanTool() *mcp.Tool {
 			"Every attached byte is sent VERBATIM to the configured reviewer vendor's API (a third party), in full, on every reviewer call of the round; " +
 			"do not attach secrets, credentials, or files the repo would not otherwise send off-host. " +
 			"ANTI_TANGENT_PLAN_ROOTS bounds which directories the server will read on your behalf. " +
-			"Optionally pass repo_root (absolute) to enable the disk tier of the Create/Modify consistency check. ",
+			"Optionally pass repo_root (absolute) to enable the disk tier of the Create/Modify consistency check. " +
+			"After editing the plan, call again with plan_run_id set to the id the previous round returned: " +
+			"only the tasks whose text changed are reviewed again, the rest keep their results, and the id stays the same. ",
 	}
 }
 
@@ -2170,27 +2177,14 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 	var repoRootUnusable string
 
 	// EXACTLY ONE stderr line per validate_plan call (CLAUDE.md's logging
-	// convention), emitted on EXIT rather than on entry. The old entry line
-	// sat BELOW both resolveContextPaths returns, so a context_paths failure
-	// — the input a caller most often gets wrong — logged nothing at all,
-	// and its own comment claiming "the only earlier returns are
-	// argument-validation errors and the plan_path too-large envelope" was
-	// false. An entry line also cannot carry the verdict or the duration,
-	// because neither exists yet: no validate_plan call was observable in
-	// the log. This is the deferred log-vars pattern from prime_handler.go /
-	// extract_handler.go — each branch sets logOutcome (and logVerdict where
-	// there is one) before returning, and the closure reads the live locals
-	// for the byte counts, so the single line always describes the actual
-	// outcome.
-	//
-	// Registered BEFORE argument validation, not after. "A malformed-argument
-	// return produces neither a review nor an envelope" is true and is
-	// exactly why those returns need a log line: a caller passing both
-	// plan_text and plan_path, or a bad mode, or an out-of-range
-	// max_tokens_override, got a transport error and total silence on
-	// stderr — the same invisible failure the exit-line rewrite existed to
-	// remove, just moved four returns earlier. Each of the four sets
-	// logOutcome = "validation_error".
+	// convention), emitted on EXIT rather than on entry: only an exit line
+	// can carry the verdict and the duration, and only one registered here,
+	// before argument validation, covers every return — a malformed argument
+	// or a context_paths failure included. This is the deferred log-vars
+	// pattern from prime_handler.go / extract_handler.go: each branch sets
+	// logOutcome (and logVerdict where there is one) before returning, and
+	// the closure reads the live locals for the byte counts, so the single
+	// line always describes the actual outcome.
 	start := time.Now()
 	logVerdict := verdict.Verdict("")
 	logOutcome := "success"
@@ -2347,7 +2341,7 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		logOutcome, logVerdict = "payload_too_large", pr.PlanVerdict
 		return planEnvelopeResult(pr, planSummaryMeta{ModelUsed: h.deps.Cfg.PlanModel.String(), Source: planSrc.String(), ContextFiles: contextSources(contextFiles)}, nil)
 	}
-	tasks, _ := planparser.SplitTasks(planText)
+	tasks, preamble := planparser.SplitTasks(planText)
 	tasksTotal := len(tasks)
 	tasksWithHeader := 0
 	for _, rt := range tasks {
@@ -2384,7 +2378,13 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		logOutcome = "model_error"
 		return nil, verdict.PlanResult{}, err
 	}
-	rendered, err := renderPlanReview(renderPlanReviewInputs{
+	round := h.newPlanRound(strings.TrimSpace(args.PlanRunID), preamble, tasks, planInputs{
+		ProjectKnowledge: projectKnowledge,
+		Mode:             args.Mode,
+		Model:            model.String(),
+		ContextFiles:     contextSources(contextFiles),
+	})
+	renderInputs := renderPlanReviewInputs{
 		PlanText:                     planText,
 		ProjectKnowledge:             projectKnowledge,
 		Tasks:                        tasks,
@@ -2393,19 +2393,25 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		ContextFiles:                 toPromptContextFiles(contextFiles),
 		ControllerRulings:            rulingsForPrompt(rulings),
 		ControllerVerifiedReferences: verifiedRefs,
-	})
+	}
+	// A round on a known run renders only what it must review; any other call
+	// renders the whole plan.
+	var rendered renderedPlanReview
+	if round.RunID != "" {
+		rendered, err = renderPlanRound(renderInputs, round)
+	} else {
+		rendered, err = renderPlanReview(renderInputs)
+	}
 	if err != nil {
 		logOutcome = "render_error"
 		return nil, verdict.PlanResult{}, err
 	}
 	// The attached set is re-sent WHOLE on every reviewer call of the round —
-	// the findings-only Pass 1 plus one call per task chunk — so billing it
-	// once under-reported a 3-call chunked round's attachment traffic by 3x.
-	// Plan text has the same property but is deliberately left unmultiplied:
-	// payload_bytes has meant "the plan payload the caller submitted" since
-	// the field existed, and re-scaling it now would make every historical
-	// row incomparable. contextBytes is new in 0.17.0 and has no history to
-	// break. Only the paths below that actually render a review use this;
+	// the findings-only Pass 1 plus one call per task chunk — so it is billed
+	// once per call. Plan text has the same property but is deliberately left
+	// unmultiplied: payload_bytes means "the plan payload the caller
+	// submitted", and scaling it would make rows incomparable with the ones
+	// already recorded. Only the paths below that actually render a review use this;
 	// the too-large / no-headings early exits never chose a chunking, so
 	// they keep the plain figure.
 	//
@@ -2418,8 +2424,17 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 	// is more API distortion than an opt-in stats edge case is worth. Rows
 	// with partial=true should be read as an upper bound on attachment bytes.
 	contextPayloadBytes := contextBytes * rendered.reviewerCalls()
-	cacheKey := planPassCacheKey(planText, projectKnowledge, args.Mode, model.String(), maxTokens, args.MaxTokensOverride, rendered, repoRoot)
-	if cached, cachedModelUsed, ok := h.planCache().lookup(cacheKey, planSrc.String()); ok {
+	// The pass cache serves callers that name no run. A round on a known run
+	// never reads or writes it: the run itself holds what an unchanged plan
+	// needs, for as long as the run lives.
+	var cacheKey [32]byte
+	cached, cachedModelUsed, cacheHit := verdict.PlanResult{}, "", false
+	if round.RunID == "" {
+		cacheKey = planPassCacheKey(planText, projectKnowledge, args.Mode, model.String(), maxTokens, args.MaxTokensOverride, rendered, repoRoot)
+		cached, cachedModelUsed, cacheHit = h.planCache().lookup(cacheKey, planSrc.String())
+		cacheHit = cacheHit && h.cachedRunHoldsPlan(&cached, round)
+	}
+	if cacheHit {
 		// Deprecation is a property of THIS call's input (plan_text vs.
 		// plan_path), not of the cached plan content, so it is applied here
 		// rather than stored on the entry — a plan_path call must not
@@ -2447,7 +2462,8 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		cachedCall := planCallContext{
 			PlanRuns:           h.deps.PlanRuns,
 			PlanLedger:         h.deps.PlanLedger,
-			OnMint:             h.onPlanRunMinted,
+			OnHeader:           h.onPlanRunHeader,
+			Round:              round,
 			Source:             planSrc.String(),
 			ModelUsed:          cachedModelUsed,
 			ReviewMS:           0,
@@ -2470,6 +2486,7 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 			partial:        cached.Partial,
 			cached:         true,
 			checklistItems: len(cached.CodebaseReferenceChecklist),
+			tasksCarried:   tasksTotal,
 			// contextBytes, NOT contextPayloadBytes: a cache hit makes no
 			// reviewer call at all, so it sends the attached set zero times.
 			// Multiplying by reviewerCalls() here billed a 3-call chunked
@@ -2486,9 +2503,12 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 	var modelUsed string
 	var ms int64
 	var partialRaw []byte
-	if rendered.Single != nil {
+	switch {
+	case round.RunID != "":
+		pr, modelUsed, ms, partialRaw, err = h.reviewPlanRound(ctx, model, rendered, round, maxTokens)
+	case rendered.Single != nil:
 		pr, modelUsed, ms, partialRaw, err = h.reviewPlanSingle(ctx, model, *rendered.Single, maxTokens)
-	} else {
+	default:
 		pr, modelUsed, ms, partialRaw, err = h.reviewPlanChunked(ctx, model, rendered, maxTokens)
 	}
 	// `pr` carries any partial state already collected before the truncation
@@ -2497,9 +2517,8 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 	// `prior` ensures those aren't dropped if the truncating chunk's bytes
 	// yield further recovery.
 	// Computed BEFORE the truncation handler so the truncation path can carry
-	// it too: this check needs no reviewer and cannot be truncated, so
-	// letting a truncated response drop it lost a finding the server already
-	// knew for certain.
+	// it too: this check needs no reviewer and cannot be truncated, so a
+	// truncated response must not drop a finding the server knows for certain.
 	fileConsistency := checkFileConsistency(tasks, repoRoot)
 	// herr, not retErr: retErr is this function's NAMED return, read by the
 	// deferred exit logger. Shadowing it here would still work (the return
@@ -2508,13 +2527,14 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 	//
 	// call is built ONCE and used by BOTH exits below — the truncation
 	// recovery inside handlePlanReviewErr and the fresh-review tail after it.
-	// That shared construction is the point: the recovery path used to
-	// hand-assemble its own tail and silently lacked three of this one's
-	// steps. See planCallContext.
+	// That shared construction is the point: a tail assembled separately for
+	// the recovery path can silently lack one of this one's steps. See
+	// planCallContext.
 	call := planCallContext{
 		PlanRuns:           h.deps.PlanRuns,
 		PlanLedger:         h.deps.PlanLedger,
-		OnMint:             h.onPlanRunMinted,
+		OnHeader:           h.onPlanRunHeader,
+		Round:              round,
 		Source:             planSrc.String(),
 		ModelUsed:          modelUsed,
 		ReviewMS:           ms,
@@ -2554,28 +2574,33 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		}
 		return r, p, herr
 	}
+	// The run keeps the reviewer's output as it is here, before any ruling,
+	// verified reference or ladder touches it, so a later round can apply its
+	// own rulings to the tasks it carries.
+	review := round.review(pr, tasks, modelUsed)
 	call.applyPreLadder(&pr)
 	// finalizePlanVerdict (not finalizePlanResult) here: it runs the
 	// normalize/calibrate/FinalizePlanVerdict ladder without touching
-	// SummaryBlock, so the PlanRunID assignment and the two per-call
-	// advisories below can all land before SummaryBlock is computed — once,
-	// authoritatively — rather than three times across this path. The ladder
+	// SummaryBlock, so the PlanRunID assignment and the per-call advisories
+	// below can all land before SummaryBlock is computed once. The ladder
 	// stays at the call site rather than inside a planCallContext method
 	// because the cache-hit path must NOT run it; see planCallContext.
 	finalizePlanVerdict(&pr, tasks)
-	// Mint BEFORE store, so the cached entry carries the plan_run_id and a
-	// later cache hit reuses this run instead of minting a second one for the
-	// same plan. finish()'s own mint below is guarded on PlanRunID == "" and
-	// is therefore a no-op here.
-	call.mintPlanRunID(&pr)
-	// Cache the result WITHOUT the per-call advisories: both the deprecation
-	// notice and the repo_root advisory are properties of which arguments
-	// THIS call used, not of the plan content, so a plan_text call and a
-	// plan_path call with byte-identical content correctly share one cache
-	// entry. Keying on "which input arg" would split the cache in two for no
-	// benefit. finish() applies them per call, after the entry is stored —
-	// see the mirrored comment on the cache-hit branch above.
-	h.planCache().store(cacheKey, pr, modelUsed)
+	pr.ReviewScope = round.scope()
+	// The run is settled BEFORE store, so the cached entry carries the
+	// plan_run_id and a later cache hit reuses this run instead of minting a
+	// second one for the same plan. finish()'s own mint below is guarded on
+	// PlanRunID == "" and is therefore a no-op here.
+	call.settlePlanRun(&pr, review)
+	if round.RunID == "" {
+		// Cache the result WITHOUT the per-call advisories: the deprecation
+		// notice, the repo_root advisory and the plan_run_id advisory are
+		// properties of which arguments THIS call used, not of the plan
+		// content, so a plan_text call and a plan_path call with
+		// byte-identical content share one cache entry. finish() applies them
+		// per call, after the entry is stored.
+		h.planCache().store(cacheKey, pr, modelUsed)
+	}
 	call.finish(&pr)
 	meta := call.meta()
 	h.recordStat(statParams{
@@ -2589,9 +2614,31 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		tasksTotal:      tasksTotal,
 		tasksWithHeader: tasksWithHeader,
 		checklistItems:  len(pr.CodebaseReferenceChecklist),
+		tasksCarried:    pr.ReviewScope.TasksCarried,
 	})
+	if rendered.reviewerCalls() == 0 {
+		logOutcome = "unchanged"
+	}
 	logVerdict = pr.PlanVerdict
 	return planEnvelopeResultFinalized(pr, meta)
+}
+
+// cachedRunHoldsPlan reports whether a pass-cache entry may answer this call,
+// and sets the entry's review scope for it: the call reviewed nothing and
+// carried every task. An entry is refused when a later round revised its run
+// to a different plan text: the id would then name a plan this call did not
+// send.
+func (h *handlers) cachedRunHoldsPlan(cached *verdict.PlanResult, round planRound) bool {
+	stored, revision, ok := h.deps.PlanRuns.Review(cached.PlanRunID)
+	if review, _ := stored.(*planReview); ok && review != nil && review.PlanKey != round.planKey {
+		return false
+	}
+	cached.ReviewScope = &verdict.PlanReviewScope{
+		Revision:      max(revision, 1),
+		TasksCarried:  len(round.carried),
+		TasksReviewed: 0,
+	}
+	return true
 }
 
 type renderedPlanChunk struct {
@@ -2966,7 +3013,7 @@ func planEnvelopeResultFinalized(pr verdict.PlanResult, meta planSummaryMeta) (*
 // truncates, the bytes can yield a plan_findings list; if a per-chunk Pass
 // 2..K+1 truncates, the bytes can yield a partial tasks[] list for that
 // chunk only. The chunked path does not aggregate partial bytes across
-// multiple successful calls — that is a follow-up.
+// multiple successful calls.
 func (h *handlers) reviewPlanChunked(
 	ctx context.Context,
 	model config.ModelRef,
@@ -2981,57 +3028,10 @@ func (h *handlers) reviewPlanChunked(
 		return verdict.PlanResult{}, "", 0, nil, err
 	}
 
-	var totalMs int64
-	var modelUsed string
-
-	// ----- Pass 1: plan-findings only -----
-	// Deliberately NO CachePrefix here. Anthropic keys a cache entry on the
-	// full request prefix — tools, then system, then the cached message
-	// content — and this call's tools block is verdict.PlanFindingsOnlySchema(),
-	// while every chunk call below sends verdict.TasksOnlySchema(). Those
-	// differ, so an entry Pass 1 wrote could never be read by a chunk call:
-	// it would just pay the ~1.25x cache-write premium for zero reads.
-	// Sending the full rendered.FindingsOnly.User as plain text costs the
-	// same 1.0x as before this feature existed. Chunk 1 (reviewOnePlanChunk)
-	// is the one that actually writes the shared prefix; chunks 2+ read it.
-	// Do not add CachePrefix back here without re-deriving the economics in
-	// the design doc — see docs/superpowers/specs (0.16.0 caching section).
-	req := providers.Request{
-		Model:      model.Model,
-		System:     rendered.FindingsOnly.System,
-		User:       rendered.FindingsOnly.User,
-		MaxTokens:  maxTokens,
-		JSONSchema: verdict.PlanFindingsOnlySchema(),
-	}
-	start := time.Now()
-	resp, err := rv.Review(ctx, req)
+	pf, modelUsed, totalMs, partialRaw, err := reviewPlanFindingsPass(ctx, rv, model, *rendered.FindingsOnly, maxTokens)
 	if err != nil {
-		if errors.Is(err, providers.ErrResponseTruncated) {
-			return verdict.PlanResult{}, "", totalMs + time.Since(start).Milliseconds(), resp.RawJSON, err
-		}
-		return verdict.PlanResult{}, "", 0, nil, err
+		return verdict.PlanResult{}, "", totalMs, partialRaw, err
 	}
-	pf, err := verdict.ParsePlanFindingsOnly(resp.RawJSON)
-	if err != nil {
-		req.User = rendered.FindingsOnly.User + "\n\n" + verdict.RetryHint()
-		resp, err = rv.Review(ctx, req)
-		if err != nil {
-			if errors.Is(err, providers.ErrResponseTruncated) {
-				return verdict.PlanResult{}, "", totalMs + time.Since(start).Milliseconds(), resp.RawJSON, err
-			}
-			return verdict.PlanResult{}, "", 0, nil, err
-		}
-		pf, err = verdict.ParsePlanFindingsOnly(resp.RawJSON)
-		if err != nil {
-			return verdict.PlanResult{}, "", 0, nil, fmt.Errorf("plan_findings_only failed schema after retry: %w", err)
-		}
-	}
-	totalMs += time.Since(start).Milliseconds()
-	modelUsed = model.Provider + ":" + resp.Model
-	if resp.Model == "" {
-		modelUsed = model.String()
-	}
-
 	result := verdict.PlanResult{
 		PlanVerdict:  pf.PlanVerdict,
 		PlanFindings: pf.PlanFindings,
@@ -3040,36 +3040,104 @@ func (h *handlers) reviewPlanChunked(
 		Tasks:        make([]verdict.PlanTaskResult, 0),
 	}
 
-	// ----- Passes 2..K+1: per-task chunks -----
-	for _, chunk := range rendered.Chunks {
-		chunkResult, ms, partialRaw, err := h.reviewOnePlanChunk(ctx, rv, model, chunk.Prompt, chunk.Tasks, maxTokens)
+	reviewed, ms, partialRaw, err := h.reviewPlanChunks(ctx, rv, model, rendered.Chunks, maxTokens)
+	totalMs += ms
+	result.Tasks = append(result.Tasks, reviewed...)
+	if err != nil {
+		if errors.Is(err, providers.ErrResponseTruncated) {
+			// Return the partially-built result (Pass-1 plan_findings plus any
+			// complete chunk task results accumulated so far) so the caller
+			// can merge it with anything recoverable from the truncating
+			// chunk's partial bytes.
+			return result, modelUsed, totalMs, partialRaw, err
+		}
+		return verdict.PlanResult{}, "", 0, nil, err
+	}
+	return result, modelUsed, totalMs, nil, nil
+}
+
+// reviewPlanFindingsPass runs the plan-findings-only reviewer call, with one
+// retry when the response fails its schema. On ErrResponseTruncated the
+// returned []byte carries the partial response bytes and the elapsed time is
+// reported; any other error returns zero values.
+//
+// The request carries no CachePrefix. Anthropic keys a cache entry on the
+// full request prefix — tools, then system, then the cached message content —
+// and this call's tools block is verdict.PlanFindingsOnlySchema(), while every
+// chunk call sends verdict.TasksOnlySchema(). An entry written here could
+// never be read by a chunk call: it would pay the cache-write premium for no
+// reads. The first chunk call (reviewOnePlanChunk) writes the shared prefix.
+func reviewPlanFindingsPass(
+	ctx context.Context,
+	rv providers.Reviewer,
+	model config.ModelRef,
+	rendered prompts.Output,
+	maxTokens int,
+) (verdict.PlanFindingsOnly, string, int64, []byte, error) {
+	req := providers.Request{
+		Model:      model.Model,
+		System:     rendered.System,
+		User:       rendered.User,
+		MaxTokens:  maxTokens,
+		JSONSchema: verdict.PlanFindingsOnlySchema(),
+	}
+	start := time.Now()
+	resp, err := rv.Review(ctx, req)
+	if err != nil {
+		if errors.Is(err, providers.ErrResponseTruncated) {
+			return verdict.PlanFindingsOnly{}, "", time.Since(start).Milliseconds(), resp.RawJSON, err
+		}
+		return verdict.PlanFindingsOnly{}, "", 0, nil, err
+	}
+	pf, err := verdict.ParsePlanFindingsOnly(resp.RawJSON)
+	if err != nil {
+		req.User = rendered.User + "\n\n" + verdict.RetryHint()
+		resp, err = rv.Review(ctx, req)
 		if err != nil {
 			if errors.Is(err, providers.ErrResponseTruncated) {
-				// Return the partially-built result (Pass-1 plan_findings plus
-				// any complete chunk task results accumulated so far) so the
-				// caller can merge it with anything recoverable from the
-				// truncating chunk's partial bytes. Without this, the Pass-1
-				// findings would be silently dropped.
-				totalMs += ms
-				return result, modelUsed, totalMs, partialRaw, err
+				return verdict.PlanFindingsOnly{}, "", time.Since(start).Milliseconds(), resp.RawJSON, err
 			}
-			return verdict.PlanResult{}, "", 0, nil, err
+			return verdict.PlanFindingsOnly{}, "", 0, nil, err
 		}
+		pf, err = verdict.ParsePlanFindingsOnly(resp.RawJSON)
+		if err != nil {
+			return verdict.PlanFindingsOnly{}, "", 0, nil, fmt.Errorf("plan_findings_only failed schema after retry: %w", err)
+		}
+	}
+	modelUsed := model.Provider + ":" + resp.Model
+	if resp.Model == "" {
+		modelUsed = model.String()
+	}
+	return pf, modelUsed, time.Since(start).Milliseconds(), nil, nil
+}
+
+// reviewPlanChunks runs one reviewer call per chunk, in order, and returns the
+// task results of every chunk that completed. On an error the results so far
+// are still returned, with the time spent; on ErrResponseTruncated the
+// returned []byte carries the truncating chunk's partial response bytes.
+func (h *handlers) reviewPlanChunks(
+	ctx context.Context,
+	rv providers.Reviewer,
+	model config.ModelRef,
+	chunks []renderedPlanChunk,
+	maxTokens int,
+) ([]verdict.PlanTaskResult, int64, []byte, error) {
+	var tasks []verdict.PlanTaskResult
+	var totalMs int64
+	expected := 0
+	for _, chunk := range chunks {
+		chunkResult, ms, partialRaw, err := h.reviewOnePlanChunk(ctx, rv, model, chunk.Prompt, chunk.Tasks, maxTokens)
 		totalMs += ms
-		result.Tasks = append(result.Tasks, chunkResult.Tasks...)
+		if err != nil {
+			return tasks, totalMs, partialRaw, err
+		}
+		tasks = append(tasks, chunkResult.Tasks...)
+		expected += len(chunk.Tasks)
 	}
-
-	expectedTasks := 0
-	for _, chunk := range rendered.Chunks {
-		expectedTasks += len(chunk.Tasks)
+	if len(tasks) != expected {
+		return nil, totalMs, nil, fmt.Errorf("chunked plan review returned %d task results, expected %d", len(tasks), expected)
 	}
-	if len(result.Tasks) != expectedTasks {
-		return verdict.PlanResult{}, "", 0, nil,
-			fmt.Errorf("chunked plan review returned %d task results, expected %d",
-				len(result.Tasks), expectedTasks)
-	}
-
-	return result, modelUsed, totalMs, nil, nil
+	return tasks, totalMs, nil, nil
 }
 
 // reviewOnePlanChunk runs one per-chunk reviewer call with identity validation

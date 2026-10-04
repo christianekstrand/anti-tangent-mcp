@@ -151,6 +151,14 @@ func formatPlanSummary(pr verdict.PlanResult, meta planSummaryMeta) string {
 	}
 	fmt.Fprintf(&b, "  model_used:    %s\n", escapeBlockValue(meta.ModelUsed))
 	fmt.Fprintf(&b, "  review_ms:     %d\n", meta.ReviewMS)
+	if s := pr.ReviewScope; s != nil {
+		planLevel := "carried"
+		if s.PlanLevelReviewed {
+			planLevel = "reviewed"
+		}
+		fmt.Fprintf(&b, "  review_scope:  revision %d: %d task(s) reviewed, %d carried; plan-level findings %s\n",
+			s.Revision, s.TasksReviewed, s.TasksCarried, planLevel)
+	}
 	crit, maj, min := countSeverities(pr.PlanFindings)
 	fmt.Fprintf(&b, "  plan_findings: %d (%d/%d/%d)\n", len(pr.PlanFindings), crit, maj, min)
 	for _, f := range pr.PlanFindings {

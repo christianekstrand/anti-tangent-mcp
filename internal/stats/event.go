@@ -37,6 +37,10 @@ type Event struct {
 	// Goal / Acceptance criteria header. Plan-header adoption telemetry.
 	TasksTotal      int `json:"tasks_total,omitempty"`
 	TasksWithHeader int `json:"tasks_with_header,omitempty"`
+	// TasksCarried is set only on validate_plan events: how many of the plan's
+	// tasks the call answered from an earlier round's result, or from the pass
+	// cache, without sending them to the reviewer.
+	TasksCarried int `json:"tasks_carried,omitempty"`
 
 	// ChecklistItems is how many codebase_reference_checklist entries a
 	// validate_task_spec or validate_plan call returned. The checklist is not

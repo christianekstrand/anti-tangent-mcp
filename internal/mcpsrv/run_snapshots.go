@@ -39,14 +39,26 @@ func (h *handlers) configuredModels() map[string]string {
 	}
 }
 
-// onPlanRunMinted records the models behind a freshly minted run and writes
-// its snapshot header.
-func (h *handlers) onPlanRunMinted(runID string, call planrun.ToolCall) {
-	h.deps.PlanRuns.SetMeta(runID, planrun.RunMeta{
+// onPlanRunHeader records the models behind a run a validate_plan round just
+// minted or revised, and writes the round's snapshot header. call is the zero
+// value for a round that made no reviewer call. tasksCarried is how many tasks
+// the round took from the round before.
+func (h *handlers) onPlanRunHeader(runID string, call planrun.ToolCall, tasksCarried int) {
+	meta := planrun.RunMeta{
 		ConfiguredModels: h.configuredModels(),
 		ServerVersion:    Version,
 		PlanCall:         &call,
-	})
+	}
+	if call.Tool == "" {
+		// The round made no reviewer call: keep the plan call of the last
+		// round that did, so the header's model and latency stay those of a
+		// real review.
+		meta.PlanCall = nil
+		if run, ok := h.deps.PlanRuns.Snapshot(runID); ok {
+			meta.PlanCall = run.PlanCall
+		}
+	}
+	h.deps.PlanRuns.SetMeta(runID, meta)
 	if h.deps.Stats == nil {
 		return
 	}
@@ -64,6 +76,8 @@ func (h *handlers) onPlanRunMinted(runID string, call planrun.ToolCall) {
 		TaskCount:        run.TaskCount,
 		ConfiguredModels: run.ConfiguredModels,
 		PlanCall:         run.PlanCall,
+		Revision:         run.Revision,
+		TasksCarried:     tasksCarried,
 	})
 }
 

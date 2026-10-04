@@ -70,6 +70,24 @@ type PlanResult struct {
 	// to-do list for the controller, not a list of findings, and does not
 	// count toward PlanVerdict.
 	CodebaseReferenceChecklist []string `json:"codebase_reference_checklist,omitempty"`
+	// ReviewScope reports what this round sent to the reviewer. Server-set;
+	// absent on a response that reviewed nothing in full, such as a rejected
+	// or truncated call.
+	ReviewScope *PlanReviewScope `json:"review_scope,omitempty"`
+}
+
+// PlanReviewScope is how much of a plan one validate_plan round reviewed. A
+// round that names an earlier round's plan_run_id reviews only the tasks
+// whose text changed and carries the rest.
+type PlanReviewScope struct {
+	// Revision numbers the rounds on the plan run, starting at 1.
+	Revision int `json:"revision"`
+	// TasksReviewed is how many tasks were sent to the reviewer this round,
+	// and TasksCarried how many kept the earlier round's result.
+	TasksReviewed int `json:"tasks_reviewed"`
+	TasksCarried  int `json:"tasks_carried"`
+	// PlanLevelReviewed is true when the plan-level pass ran this round.
+	PlanLevelReviewed bool `json:"plan_level_reviewed"`
 }
 
 // PlanTaskResult is the per-task analysis carried inside PlanResult.Tasks.

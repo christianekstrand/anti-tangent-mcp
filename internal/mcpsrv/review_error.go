@@ -129,10 +129,14 @@ type planCallContext struct {
 	// PlanLedger receives a header line for every freshly minted run. Nil-safe:
 	// nil unless ANTI_TANGENT_STATS_DIR and ANTI_TANGENT_PLAN_LEDGER are set.
 	PlanLedger *planrun.Ledger
-	// OnMint, when set, is told about every freshly minted run together with
-	// the validate_plan call that produced it. Nil in tests that build a
-	// context by hand.
-	OnMint func(runID string, call planrun.ToolCall)
+	// OnHeader, when set, is told about every run this call minted or revised,
+	// together with the validate_plan call that did and how many tasks that
+	// call carried. The call is the zero value for a round that made no
+	// reviewer call. Nil in tests that build a context by hand.
+	OnHeader func(runID string, call planrun.ToolCall, tasksCarried int)
+	// Round places this call against the plan run it named. Its zero value is
+	// a call that named none.
+	Round planRound
 	// Source is the caller's pre-rendered provenance string (planSrc.String()),
 	// empty when plan_text was used. Threaded through so every envelope —
 	// recovery and cache hit included — carries the same source line a
@@ -237,30 +241,71 @@ func (c planCallContext) applyPreLadder(pr *verdict.PlanResult) {
 
 // mintPlanRunID assigns a plan_run_id when pr does not already carry one.
 // Idempotent by that guard, which is what lets finish() call it
-// unconditionally while the fresh-review path hoists it above store(). On a
-// freshly minted run it also appends a best-effort ledger header, recording
-// the run's id, verdict, quality and the plan's task headings; the early
-// return on an existing id is what keeps a cache hit from writing a second
-// header.
+// unconditionally while the fresh-review path settles the run above store().
+// On a freshly minted run it also writes the run's header; the early return on
+// an existing id is what keeps a cache hit from writing a second one.
 func (c planCallContext) mintPlanRunID(pr *verdict.PlanResult) {
 	if pr.PlanRunID != "" {
 		return
 	}
 	run := c.PlanRuns.CreateWithTasks(string(pr.PlanVerdict), string(pr.PlanQuality), planRunTasks(*pr, c.Tasks))
 	pr.PlanRunID = run.ID
+	c.writeRunHeader(run, *pr)
+}
+
+// writeRunHeader records a run this call minted or revised: a best-effort
+// ledger header carrying the run's id, verdict, quality, revision and the
+// plan's task headings, and the stats snapshot header.
+func (c planCallContext) writeRunHeader(run *planrun.Run, pr verdict.PlanResult) {
 	if err := c.PlanLedger.AppendHeader(run); err != nil {
 		slog.Warn("plan ledger header append failed", "plan_run_id", run.ID, "err", err)
 	}
-	if c.OnMint != nil {
-		c.OnMint(run.ID, planrun.ToolCall{
-			Tool:     "validate_plan",
-			Model:    c.ModelUsed,
-			Verdict:  string(pr.PlanVerdict),
-			Findings: len(planFindings(*pr)),
-			MS:       c.ReviewMS,
-			Partial:  pr.Partial,
-		})
+	if c.OnHeader == nil {
+		return
 	}
+	call := planrun.ToolCall{
+		Tool:     "validate_plan",
+		Model:    c.ModelUsed,
+		Verdict:  string(pr.PlanVerdict),
+		Findings: len(planFindings(pr)),
+		MS:       c.ReviewMS,
+		Partial:  pr.Partial,
+	}
+	carried := 0
+	if s := pr.ReviewScope; s != nil {
+		carried = s.TasksCarried
+		if s.TasksReviewed == 0 && !s.PlanLevelReviewed {
+			// A round that made no reviewer call has no call to record: the
+			// header keeps the last round's that did.
+			call = planrun.ToolCall{}
+		}
+	}
+	c.OnHeader(run.ID, call, carried)
+}
+
+// settlePlanRun gives a completed review its run and stores review on it: a
+// new run for a call that named none, or the next revision of the run the
+// call named. A named run that expired while its round was being reviewed is
+// replaced by a new one, which the scope then reports as revision 1.
+func (c planCallContext) settlePlanRun(pr *verdict.PlanResult, review *planReview) {
+	if c.Round.RunID != "" {
+		run, ok := c.PlanRuns.Revise(c.Round.RunID, string(pr.PlanVerdict), string(pr.PlanQuality), planRunTasks(*pr, c.Tasks), review)
+		if ok {
+			pr.PlanRunID = run.ID
+			if pr.ReviewScope != nil {
+				// Two rounds on one run can both start from the same
+				// revision; the store's count is the one that is true.
+				pr.ReviewScope.Revision = run.Revision
+			}
+			c.writeRunHeader(run, *pr)
+			return
+		}
+		if pr.ReviewScope != nil {
+			pr.ReviewScope.Revision = 1
+		}
+	}
+	c.mintPlanRunID(pr)
+	c.PlanRuns.SetReview(pr.PlanRunID, review)
 }
 
 // planRunTasks lists the plan's tasks for a new run: the parsed headings, in
@@ -293,7 +338,15 @@ func planRunTasks(pr verdict.PlanResult, tasks []planparser.RawTask) []planrun.P
 // content, so none may be stored on a cache entry. Deprecation goes first
 // because it has been PlanFindings[0] since it existed.
 func (c planCallContext) finish(pr *verdict.PlanResult) {
+	if pr.PlanRunID == "" {
+		// A round on a known run that was cut short keeps the run's id without
+		// revising the run: its result is incomplete.
+		pr.PlanRunID = c.Round.RunID
+	}
 	c.mintPlanRunID(pr)
+	if c.Round.UnknownRunID != "" {
+		pr.PlanFindings = append(pr.PlanFindings, unknownPlanRunAdvisory(c.Round.UnknownRunID, pr.PlanRunID))
+	}
 	if len(c.MalformedRulingIDs) > 0 {
 		pr.PlanFindings = append(pr.PlanFindings, malformedPlanRulingsAdvisory(c.MalformedRulingIDs))
 	}
@@ -343,11 +396,16 @@ func (h *handlers) handlePlanReviewErr(in planReviewErrInputs) (*mcp.CallToolRes
 	if !errors.Is(in.Err, providers.ErrResponseTruncated) {
 		return nil, verdict.PlanResult{}, true, in.Err
 	}
-	pr, ok := recoverPartialPlanFindings(in.PartialRaw, in.Prior)
-	if !ok {
-		pr = truncatedPlanResult()
-	}
 	call := in.Call
+	var pr verdict.PlanResult
+	if call.Round.RunID != "" {
+		pr = truncatedRoundResult(in.Prior, call.Round)
+	} else {
+		var ok bool
+		if pr, ok = recoverPartialPlanFindings(in.PartialRaw, in.Prior); !ok {
+			pr = truncatedPlanResult()
+		}
+	}
 	if call.ModelUsed == "" {
 		// Pass 1 failed before the provider reported a model.
 		call.ModelUsed = in.Model.String()
