@@ -358,11 +358,16 @@ func (r planRound) mergeTasks(reviewed []verdict.PlanTaskResult) []verdict.PlanT
 
 // truncatedRoundResult turns what a round on a known run had when a reviewer
 // call was cut short into the partial result it returns: the carried tasks
-// and the tasks reviewed before the cut, under a verdict that cannot be pass.
-// The tasks the round did not reach have no result, and a round that names
-// only carried tasks would otherwise read as a clean review of text the
-// reviewer never finished; the major finding is what holds the verdict down.
-func truncatedRoundResult(partial verdict.PlanResult, round planRound) verdict.PlanResult {
+// and the tasks reviewed before the cut. The tasks the round did not reach
+// have no result, and a round that names only carried tasks would otherwise
+// read as a clean review of text the reviewer never finished, so the second
+// return value is the major finding that holds the verdict down.
+//
+// The finding is returned apart from the result because the caller must add
+// it after controller rulings are applied: its fingerprint is the same on
+// every truncated round, and a ruling that reached it would waive it and let
+// the round pass with a task unreviewed.
+func truncatedRoundResult(partial verdict.PlanResult, round planRound) (verdict.PlanResult, verdict.Finding) {
 	pr := clonePlanResult(partial)
 	missing := len(round.carried) - len(pr.Tasks)
 	planLevel := ""
@@ -374,17 +379,16 @@ func truncatedRoundResult(partial verdict.PlanResult, round planRound) verdict.P
 	if pr.PlanQuality == "" {
 		pr.PlanQuality = verdict.PlanQualityRough
 	}
-	pr.PlanFindings = append(pr.PlanFindings, verdict.Finding{
+	pr.NextAction = advice.NextAction
+	pr.Partial = true
+	return pr, verdict.Finding{
 		Severity:  verdict.SeverityMajor,
 		Category:  verdict.CategoryOther,
 		Criterion: "reviewer_response",
 		Evidence: fmt.Sprintf("%s. This round did not finish: %d of the plan's %d task(s) have no result.%s",
 			providers.ErrResponseTruncated.Error(), missing, len(round.carried), planLevel),
 		Suggestion: advice.PlanFindings[0].Suggestion,
-	})
-	pr.NextAction = advice.NextAction
-	pr.Partial = true
-	return pr
+	}
 }
 
 // unknownPlanRunAdvisory tells a validate_plan caller that the plan_run_id it

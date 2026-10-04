@@ -398,8 +398,11 @@ func (h *handlers) handlePlanReviewErr(in planReviewErrInputs) (*mcp.CallToolRes
 	}
 	call := in.Call
 	var pr verdict.PlanResult
+	var unfinished *verdict.Finding
 	if call.Round.RunID != "" {
-		pr = truncatedRoundResult(in.Prior, call.Round)
+		var f verdict.Finding
+		pr, f = truncatedRoundResult(in.Prior, call.Round)
+		unfinished = &f
 	} else {
 		var ok bool
 		if pr, ok = recoverPartialPlanFindings(in.PartialRaw, in.Prior); !ok {
@@ -413,6 +416,11 @@ func (h *handlers) handlePlanReviewErr(in planReviewErrInputs) (*mcp.CallToolRes
 	// Same tail, same order, as ValidatePlan's fresh-review path — minus the
 	// store(), because a truncated result is never cached. See planCallContext.
 	call.applyPreLadder(&pr)
+	if unfinished != nil {
+		// After the waiver inside applyPreLadder, so no ruling reaches it, and
+		// before the ladder, which derives warn from it.
+		pr.PlanFindings = append(pr.PlanFindings, *unfinished)
+	}
 	finalizePlanVerdict(&pr, call.Tasks)
 	call.finish(&pr)
 	r, p, err := planEnvelopeResultFinalized(pr, call.meta())

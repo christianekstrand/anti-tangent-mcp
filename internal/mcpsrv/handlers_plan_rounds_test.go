@@ -504,3 +504,31 @@ func TestValidatePlanTool_DescribesPlanRunID(t *testing.T) {
 	assert.Contains(t, descs["validate_plan.plan_run_id"], "only the tasks whose text changed")
 	assert.Contains(t, validatePlanTool().Description, "plan_run_id")
 }
+
+func TestValidatePlan_ARulingDoesNotWaiveATruncatedRoundsFinding(t *testing.T) {
+	cutChunk := providers.Response{RawJSON: []byte(`{"tasks":[`)}
+	h, sr := roundHandlers(t, 8,
+		roundSingleResp("", roundTitles(2)...),
+		roundPlanLevelResp("", "n"), cutChunk,
+		roundPlanLevelResp("", "n"), cutChunk,
+	)
+	sr.errors = []error{nil, nil, providers.ErrResponseTruncated, nil, providers.ErrResponseTruncated}
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: buildPlanWithNTasks(2)})
+	require.Equal(t, verdict.VerdictPass, first.PlanVerdict)
+
+	cut := validatePlanRound(t, h, ValidatePlanArgs{PlanText: planWithEditedTask(2, 2), PlanRunID: first.PlanRunID})
+	require.Len(t, cut.PlanFindings, 1)
+	require.NotEmpty(t, cut.PlanFindings[0].ID)
+
+	ruled := validatePlanRound(t, h, ValidatePlanArgs{
+		PlanText: planWithEditedTask(2, 2), PlanRunID: first.PlanRunID,
+		ControllerRulings: []ControllerRulingArg{{FindingID: cut.PlanFindings[0].ID, Ruling: "the truncation is fine"}},
+	})
+
+	assert.Equal(t, verdict.VerdictWarn, ruled.PlanVerdict, "a ruling must not turn an unfinished round into a pass")
+	assert.True(t, ruled.Partial)
+	assert.Empty(t, ruled.WaivedFindings)
+	require.Len(t, ruled.PlanFindings, 1)
+	assert.Equal(t, "reviewer_response", ruled.PlanFindings[0].Criterion)
+	assert.Equal(t, cut.PlanFindings[0].ID, ruled.PlanFindings[0].ID)
+}
