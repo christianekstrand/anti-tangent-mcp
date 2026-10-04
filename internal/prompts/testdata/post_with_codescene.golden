@@ -68,9 +68,34 @@ PASS: TestHealthReturns200
 
 anti-tangent independently flags test evidence whose own text states that no test executed; do not emit a separate finding solely restating that. Cross-check the evidence against the AC list as described above.
 
-When the provided evidence addresses every AC and the implementer's narrative is internally consistent with it, prefer `verdict: pass` with a `category: quality` finding for nit-level concerns over `verdict: fail`. Reserve `severity: critical` and `severity: major` for evidence that affirmatively contradicts an AC, OR for an AC that is left unaddressed by any of the provided evidence. The bias toward `pass` applies only when every AC has been addressed — not when evidence is absent for an AC.
+When the provided evidence addresses every AC and the implementer's narrative is internally consistent with it, prefer `verdict: pass` with a `category: quality` finding for nit-level concerns over `verdict: fail`. Reserve `severity: critical` and `severity: major` for evidence that affirmatively contradicts an AC, OR for an AC that is left unaddressed by any of the provided evidence, OR for a `correctness` or `test_adequacy` finding that meets the severity bar in its own section below. The bias toward `pass` applies only when every AC has been addressed — not when evidence is absent for an AC, and not when the evidence shows a defect.
 
 If you would emit a finding with `category: ambiguous_spec` AND `severity: major`, but a normative test body (provided in the `Normative test bodies` section above) explicitly pins the value or assertion that the AC's prose leaves ambiguous, downgrade the severity to `minor` and append `(resolved-by-normative-body: <short citation of which body resolves it, max 80 chars>)` to the `suggestion` field. The `criterion` and `evidence` fields stay as you would have written them.
+
+### Correctness
+
+The acceptance-criteria walk above asks whether each criterion is met. This section asks a different question: is the code right? A criterion can be met by code that is still wrong. Read what this change adds or modifies and look for defects, whether or not a criterion mentions them:
+
+- a wrong result for an input the task covers: empty, zero, negative, duplicate, missing, or at a boundary;
+- an error, a failure return or a nil / None / undefined value that is dropped, or handled so that the caller carries on with bad data;
+- state shared between threads, goroutines or requests that this change reads or writes without the protection the surrounding code uses;
+- a file, lock, connection or transaction that is not released on every path;
+- a caller and a callee that this change updates on one side only;
+- behaviour the summary claims that the code shown does not have.
+
+Report only what the evidence shows. Quote the offending lines in `evidence` with their path, and with a line number when a diff hunk header gives one, never an invented one; then state the input or sequence that triggers the defect and the wrong outcome it produces. Give the fix in `suggestion`. Do not speculate about code that was not submitted: "this may break callers elsewhere" is not a finding, and neither is a defect in code this change does not touch.
+
+Emit each defect as its own finding with `category: correctness`. Set `criterion` to the verbatim AC text when the defect breaks that criterion, and to `correctness` otherwise. Severity: `critical` for data loss, a security hole, or a crash on the main path; `major` for a wrong result or an unhandled failure on a path the task's Goal or acceptance criteria cover; `minor` for a defect on a path the task does not exercise.
+
+### Test adequacy
+
+Apply this when the change adds or modifies tests, or when test evidence was provided. For each acceptance criterion that describes behaviour, ask whether a test in the evidence would fail if that behaviour were broken. Flag:
+
+- a test that asserts nothing about the behaviour: it only checks that nothing was thrown, only checks a mock it configured itself, or restates the implementation;
+- a criterion that names a failure or boundary case and is tested only on the happy path;
+- an individual test the evidence shows was skipped or deselected.
+
+Emit `category: test_adequacy` with `criterion` set to the verbatim AC text. Severity: `major` when a criterion has no test that would catch its breakage and the task's acceptance criteria or Verification call for tests; `minor` otherwise. Do not flag tests the task does not call for, and do not use this category for evidence that is merely absent: that is `insufficient_evidence`.
 
 ### Comment hygiene
 

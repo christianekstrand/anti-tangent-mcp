@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `correctness` and `test_adequacy` finding categories for the per-task review tools. Neither is severity-floored, and a major one is an open code finding: `next_action` tells the implementer to fix and re-validate.
 
+### Changed
+
+- `validate_completion` now asks the reviewer to look for defects in the submitted change (wrong results on boundary inputs, dropped failures, unprotected shared state, unreleased resources, one-sided caller/callee changes) and for tests that would not fail if the behaviour broke, reported as `correctness` and `test_adequacy`. A finding of either kind can be critical or major, so it moves the verdict; the reviewer is told to report only what the submitted evidence shows.
+
 ## [0.26.0] - 2026-09-24
 
 ### Added
