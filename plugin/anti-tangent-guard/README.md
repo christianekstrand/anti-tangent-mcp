@@ -1,20 +1,23 @@
 # anti-tangent-guard
 
-Three hooks enforcing anti-tangent-mcp's conventions: a `PostToolUse` hook that
+Four hooks enforcing anti-tangent-mcp's conventions: a `PostToolUse` hook that
 mandates the `validate_completion` gate at task close, blocks a full-protocol
 close that ran with no task session, and detects when submitted diffs add
 comments carrying change history; a `PreToolUse` hook on `Edit`/`Write`/
 `NotebookEdit` that refuses a dispatched implementer's first edit until
-`validate_task_spec` has been called; and a `PreToolUse` hook that prevents
-such comments from being written in the first place.
+`validate_task_spec` has been called; a `PreToolUse` hook that prevents
+such comments from being written in the first place; and a `PostToolUse` hook
+on `Edit`/`Write`/`NotebookEdit` that asks a task, once, for a
+`check_progress` call when it reaches ten edits without one.
 
 ## Active on install
 
-This plugin has three hooks and no configuration step. As soon as it is
+This plugin has four hooks and no configuration step. As soon as it is
 installed, every `TaskUpdate` call is watched for the completion gate, every
 `Edit`/`Write`/`NotebookEdit` call inside a dispatched subagent is watched for
 the start gate, and every `Edit`/`Write` call is intercepted for the write-time
-comment-hygiene scan — there is nothing further to turn on.
+comment-hygiene scan, and each of those edits is counted toward the progress
+reminder — there is nothing further to turn on.
 
 ## What it does, and what it does not do
 
@@ -258,6 +261,40 @@ hook fails open — the heading is the contract. The `subagents/` layout is what
 Claude Code writes today, not a documented interface: a subagent transcript
 that is missing or unreadable exits 0, so a layout change disables the gate
 rather than blocking every write. Kill switch: `ANTI_TANGENT_SESSION_GUARD=0`.
+
+## Progress reminder (PostToolUse hook)
+
+`check-progress-nudge` fires after every `Edit`, `Write` and `NotebookEdit`.
+It reads the session's own transcript — the subagent's when the payload
+carries `agent_id` (the file beside the parent's, or `transcript_path` itself
+when that already names an agent transcript), the main session's otherwise —
+and looks at the window
+after the last `mcp__anti-tangent__validate_task_spec` call, which is the
+current task. When that window reaches `ANTI_TANGENT_PROGRESS_EDITS` edits
+(default 10) and holds no `check_progress` call, the hook exits 2 with a
+message asking for one. The edit has already happened and is kept: exit 2 on
+`PostToolUse` hands the message to the model and undoes nothing.
+
+A task is asked once. The hook records the ask in a `progress-asked-<hash>`
+file beside the trace log, created exclusively, so edits sent in one turn —
+whose hooks run at the same time and all read the same count — produce one
+message, not one each. The files are empty and are not removed; the hash is
+of the transcript path and the `validate_task_spec` call's id.
+
+It stays silent when the transcript has no `validate_task_spec` call (no
+task, which also covers a lightweight task and a controller's own edits),
+when the task has already called `check_progress`, and once the task has
+called `validate_completion` — edits after that are fixes to review findings.
+
+Unlike the start gate it also acts in the main session, because a task run
+there with no dispatched subagent has no other transcript. Limits: edits made
+through `Bash` are not counted, an edit another hook refused is counted (the
+count is of attempts in the transcript), and a session that runs several
+tasks is judged only on the one after its last `validate_task_spec` call. Every failure
+allows: no `python3`, no readable transcript, a malformed payload, or a
+directory the ask cannot be recorded in all exit 0, and the hook's entry in
+`hooks.json` carries a 10-second timeout. Kill switch:
+`ANTI_TANGENT_PROGRESS_GUARD=0`.
 
 ## Write-time comment guard (PreToolUse hook)
 
@@ -621,6 +658,12 @@ Colon-separated glob patterns (`fnmatch` syntax), matched against the edited fil
 tool call names it. A match disables the semantic tier for that write (`jev-skip | excluded`)
 while leaving the pattern tier running. Unset by default — nothing is excluded.
 
+### `ANTI_TANGENT_PROGRESS_EDITS`
+
+How many edits a task makes after `validate_task_spec` before the progress
+reminder asks for `check_progress`. Default `10`. A value that is not a whole
+number above zero is ignored and the default applies.
+
 ## Kill switches
 
 - `ANTI_TANGENT_COMPLETION_GUARD=0` disables the completion-gate check in the
@@ -634,6 +677,9 @@ while leaving the pattern tier running. Unset by default — nothing is excluded
 - Setting all three to `0` is what short-circuits the `PostToolUse` hook to
   `exit 0` before it reads stdin. With any one still on, the hook reads stdin
   and runs the rules that are still enabled.
+- `ANTI_TANGENT_PROGRESS_GUARD=0` disables the progress reminder
+  (`PostToolUse` on `Edit`/`Write`/`NotebookEdit`) and nothing else. It is not
+  one of the three switches above: the reminder is a separate hook.
 - `ANTI_TANGENT_JEV` unset or not exactly `1` disables the semantic tier alone,
   leaving the pattern tier, the completion gate and the start gate untouched.
   It has no bearing on the `PostToolUse` hook or the three switches above:
@@ -726,6 +772,22 @@ since it has no task id to report, and its own event set: `pass | spec-called`
 could not be read), `skip | guard=0`, `skip | no-python3`, `skip | no-body`,
 and `error | python-exit=N`.
 
+`check-progress-nudge` carries the literal tag `progress` in that column, and
+inside a subagent its session column reads `s=<session>.<agent>` (the first 8
+characters of each), because subagents of one session run at the same time
+and each has its own count. Its events: `pass | edits=N` (the task has made N edits and nothing is asked: it
+is under the threshold, has already called `check_progress`, or was already
+asked), `nudge | edits=N` (the hook asked), `skip | no-task` (no
+`validate_task_spec` call in the transcript), `skip | completing` (the task
+has called `validate_completion`), `skip | no-state` (the ask could not be
+recorded beside the trace log, so it was not made), `skip | not-gated` (an
+unreadable payload or transcript, or a tool the hook does not act on),
+`skip | guard=0`, `skip | no-python3`, `skip | no-body`, and
+`error | python-exit=N` (which includes an exit 2 that came with no edit
+count: the interpreter failing, not the body asking). The largest `edits=` a task reaches is how many edits
+it made before completion, which is the number to tune
+`ANTI_TANGENT_PROGRESS_EDITS` against.
+
 The semantic tier adds five events of its own to `check-comment-write`'s trace line, reached only
 after a clean pattern-tier pass: `jev-block | p=<probability>` when a touched block scores at or
 above the threshold (the write is refused); `jev-pass | blocks=<n>` when every scored block cleared
@@ -795,12 +857,13 @@ bash evals/run.sh
 ```
 
 Runs the hooks' own unit tests (`hooks/*_test.py`) first, then the full eval
-suite (179 cases) against all three hooks, and exits non-zero on either — the
+suite (198 cases) against all four hooks, and exits non-zero on either — the
 cases cover check-task-complete's four block conditions (the third being its
 own close-time comment-hygiene scan, the fourth being the no-session rule),
 check-comment-write's write-time comment-hygiene guard — both the pattern
 tier and, behind a loopback stub server the suite starts and tears down
-itself, the semantic tier — and check-task-start's start gate. See
+itself, the semantic tier — check-task-start's start gate, and
+check-progress-nudge's once-per-task reminder. See
 `evals/run.sh`'s header comment for the
 full breakdown by case. Cases 18/19 are deliberately un-escaped fixtures — they
 test positional extraction against an older server. Cases 20/21 are the

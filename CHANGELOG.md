@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `check_progress` asks the reviewer for correctness defects in the files submitted so far, reported as `correctness`, using a short form of the completion review's section. Unfinished work is not a defect, and the rule against style findings mid-task stays.
 - An `over_building` finding raised on two consecutive `validate_completion` calls, with no `finding_responses` entry answering it and no controller ruling covering it, gains a companion `major` `unaddressed_finding` with `criterion: over_building`, which moves the verdict and tells the implementer to cut the structure or answer the finding with the reason it stays. With an answer the finding stays `minor`, on that call and on the session's later ones. A finding the reviewer links to a pre-task `over_building` finding is addressed to the plan author and draws no companion.
 - `anti-tangent-guard`'s comment scan covers `.mjs` and `.vue` (JavaScript rules) and `.kts` (Kotlin rules). The `<!-- -->` comments of a `.vue` template block are not recognised.
+- The implementer protocol no longer calls `check_progress` optional and low-signal: the dispatch clause says to call it when the guard asks, or when drift is suspected.
 
 ## [0.26.0] - 2026-09-24
 

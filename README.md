@@ -352,7 +352,7 @@ CodeScene is optional to adopt, but **once it is configured in your host, the co
 
 When CodeScene MCP is configured in your host alongside anti-tangent, these calls are **required** of dispatched implementers, and the DONE report must carry a one-line CodeScene status — the `analyze_change_set` delta, or that it was skipped and why. That line is how the controller sees the required check actually ran; a missing line reads as non-adoption:
 
-- `pre_commit_code_health_safeguard` mid-task — deterministic Code Health check on uncommitted/staged files. Fast, cheap, and complementary to anti-tangent's optional `check_progress`.
+- `pre_commit_code_health_safeguard` mid-task — deterministic Code Health check on uncommitted/staged files. Fast, cheap, and complementary to anti-tangent's `check_progress`.
 - `analyze_change_set` before reporting DONE — full branch-vs-base Code Health analysis. Cite the delta (e.g. `CodeScene: Code Health 9.1 → 9.1, no regression`) and any findings in the DONE summary alongside anti-tangent's `summary_block`.
 
 **In-band attribution (v0.15.0+).** Pass the `analyze_change_set` result to `validate_completion` as a structured `codescene` argument instead of (or alongside) the hook below: `{ran, skip_reason, tool, quality_gate, files_analyzed, verdicts: {improved, degraded, stable}, trend, net_pp, category_counts}`, plus `skip_evidence` (v0.20.0+) and `base_ref`, the ref the analysis compared against, so `plan_run_report` counts a branch-versus-base result once. Anti-tangent attributes it to the task in `plan_run_report`, rather than only the content-free aggregate the hook writes to `codescene-events.jsonl`. Since v0.22.0 the argument also accepts `analyze_change_set`'s raw JSON (`quality_gates`, `results[]`) and reduces it server-side, and unknown keys are ignored instead of rejecting the call. `pre_commit_code_health_safeguard` sees only uncommitted changes, so after a commit it reports zero files and is not a CodeScene run of the task.
@@ -637,7 +637,7 @@ See [`plugin/anti-tangent-shunt/README.md`](plugin/anti-tangent-shunt/README.md)
 
 ### anti-tangent-guard
 
-Three hooks that enforce anti-tangent-mcp's conventions, all of which block.
+Four hooks that enforce anti-tangent-mcp's conventions. Three block; the fourth asks.
 
 A `PostToolUse` hook on `TaskUpdate` enforces the `validate_completion` gate at task close: when a task is marked completed without running `validate_completion`, or the evidence it was validated against adds comments carrying change history, the guard returns a blocking instruction to reopen, fix, and re-close. It detects rather than prevents — `PostToolUse` fires after the state change, so it cannot stop the close itself.
 
@@ -645,7 +645,9 @@ A `PreToolUse` hook on `Edit`/`Write` refuses a write that adds such a comment, 
 
 A second `PreToolUse` hook, on `Edit`/`Write`/`NotebookEdit`, refuses a dispatched implementer's first edit until `validate_task_spec` has been called, and the close-time hook blocks a full-protocol close whose `validate_completion` ran with no task session (an empty `session_id` is reviewed against a spec with no acceptance criteria). The dispatch prompt's heading is the fingerprint: `## Drift-protection protocol (anti-tangent-mcp)` gates the session, `Drift-protection protocol (lightweight)` exempts it.
 
-Kill switches: `ANTI_TANGENT_SESSION_GUARD=0` turns off the start gate and the no-session close rule; `ANTI_TANGENT_COMPLETION_GUARD=0` turns off the completion gate only; `ANTI_TANGENT_COMMENT_GUARD=0` turns off comment scanning at both write time and close time; setting all three is what silences the close-time hook entirely.
+A `PostToolUse` hook on `Edit`/`Write`/`NotebookEdit` asks a task for a `check_progress` call, once, when it has made ten edits since `validate_task_spec` without one (`ANTI_TANGENT_PROGRESS_EDITS` changes the ten). It refuses nothing: the edit is kept and the message goes to the model. It is silent when the session has no `validate_task_spec` call, and after `validate_completion`.
+
+Kill switches: `ANTI_TANGENT_SESSION_GUARD=0` turns off the start gate and the no-session close rule; `ANTI_TANGENT_COMPLETION_GUARD=0` turns off the completion gate only; `ANTI_TANGENT_COMMENT_GUARD=0` turns off comment scanning at both write time and close time; setting all three is what silences the close-time hook entirely; `ANTI_TANGENT_PROGRESS_GUARD=0` turns off the progress reminder.
 
 **Install:**
 
