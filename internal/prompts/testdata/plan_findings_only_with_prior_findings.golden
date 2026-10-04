@@ -62,9 +62,9 @@ one, from the plan text above, whether it still holds:
 - If it still holds, raise it again with the same `category` and `criterion`,
   so the controller can see it is the same finding.
 
-Raise a finding that is not in this list only for a problem the edit
-introduced, or for one that is critical or major. Do not look for new minor
-findings in text the earlier round already accepted.
+Beyond this list, raise a new plan-level finding only if it is critical or
+major, or one the sections below require. Do not go looking for new minor
+findings: the earlier round reviewed this plan and did not raise them.
 
 - [major][ambiguous_spec] task order — Task 2 needs Task 3's type
 - [minor][quality] intro — no architecture section

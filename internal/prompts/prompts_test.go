@@ -2565,4 +2565,7 @@ func TestRenderPlanFindingsOnly_ShowsEarlierPlanFindingsInTheSuffixOnly(t *testi
 		"a multi-line field is folded onto its bullet")
 	assert.Contains(t, out.UserSuffix, "- [minor][quality] intro — no architecture section\n")
 	assert.Less(t, strings.Index(out.UserSuffix, "## Earlier plan-level findings"), strings.Index(out.UserSuffix, "## Output"))
+	assert.Contains(t, out.UserSuffix, "only if it is critical or\nmajor, or one the sections below require",
+		"the limit on new findings must not forbid the findings later sections make mandatory")
+	assert.NotContains(t, out.UserSuffix, "the edit\nintroduced", "the reviewer is not shown what the edit changed")
 }
