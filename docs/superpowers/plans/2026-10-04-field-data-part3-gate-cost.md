@@ -96,34 +96,34 @@ Apply a patch with `git apply --index <file>` from the repository root. **A patc
 
 **Steps:**
 
-- [ ] **Step 1: Apply the tests**
+- [x] **Step 1: Apply the tests**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/01-checklist-field.tests.patch
 ```
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `go test ./internal/mcpsrv/...`
 Expected: FAIL to build — `undefined: splitTaskSpecChecklist`, and `env.CodebaseReferenceChecklist undefined`.
 
-- [ ] **Step 3: Apply the implementation**
+- [x] **Step 3: Apply the implementation**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/01-checklist-field.impl.patch
 ```
 
-- [ ] **Step 4: Run the suites**
+- [x] **Step 4: Run the suites**
 
 Run: `go build ./... && go test -race ./...`
 Expected: every package `ok`.
 
-- [ ] **Step 5: Check the tree and the budget**
+- [x] **Step 5: Check the tree and the budget**
 
 Run: `bash docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/check-tree.sh 01 && wc -c docs/protocol/core.md && diff -r docs/protocol plugin/anti-tangent-protocol/protocol`
 Expected: `tree OK (01)`; `15983 docs/protocol/core.md`; `diff` prints nothing.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat: codebase_reference_checklist is an envelope field, not a finding"
@@ -162,34 +162,34 @@ git commit -m "feat: codebase_reference_checklist is an envelope field, not a fi
 
 **Steps:**
 
-- [ ] **Step 1: Apply the tests**
+- [x] **Step 1: Apply the tests**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/02-listed-file-paths.tests.patch
 ```
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `go test ./internal/planparser/... ./internal/planrun/... ./internal/mcpsrv/... ./internal/prompts/...`
 Expected: FAIL — `undefined: ListedPaths`, `undefined: claimIsOnlyListedPaths`, `unknown field Files`, and the `plan_*` golden tests differ.
 
-- [ ] **Step 3: Apply the implementation**
+- [x] **Step 3: Apply the implementation**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/02-listed-file-paths.impl.patch
 ```
 
-- [ ] **Step 4: Run the suites and check the goldens are current**
+- [x] **Step 4: Run the suites and check the goldens are current**
 
 Run: `go build ./... && go test -race ./... && go test ./internal/prompts/... -update && git status --short internal/prompts/testdata`
 Expected: every package `ok`; `git status` prints nothing.
 
-- [ ] **Step 5: Check the tree**
+- [x] **Step 5: Check the tree**
 
 Run: `bash docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/check-tree.sh 02`
 Expected: `tree OK (02)`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat: a path a task lists in its Files section is not a codebase claim"
@@ -228,34 +228,34 @@ git commit -m "feat: a path a task lists in its Files section is not a codebase 
 
 **Steps:**
 
-- [ ] **Step 1: Apply the tests**
+- [x] **Step 1: Apply the tests**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/03-codescene-events.tests.patch
 ```
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `go test ./internal/stats/... ./internal/session/... ./internal/mcpsrv/...; bash examples/hooks/codescene-log_test.sh`
 Expected: FAIL — `undefined: codesceneRunKey`, `r.RecordCodescene undefined`, `unknown field CodesceneEventKey`; the hook test prints `FAIL: the retired hook wrote into the stats dir`.
 
-- [ ] **Step 3: Apply the implementation**
+- [x] **Step 3: Apply the implementation**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/03-codescene-events.impl.patch
 ```
 
-- [ ] **Step 4: Run the suites**
+- [x] **Step 4: Run the suites**
 
 Run: `go build ./... && go test -race ./... && bash examples/hooks/codescene-log_test.sh`
 Expected: every package `ok`, then `OK`.
 
-- [ ] **Step 5: Check the tree**
+- [x] **Step 5: Check the tree**
 
 Run: `bash docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/check-tree.sh 03`
 Expected: `tree OK (03)`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat: the server writes codescene-events.jsonl; the PostToolUse hook is retired"
@@ -285,34 +285,34 @@ git commit -m "feat: the server writes codescene-events.jsonl; the PostToolUse h
 
 **Steps:**
 
-- [ ] **Step 1: Apply the tests**
+- [x] **Step 1: Apply the tests**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/04-plan-run-revision.tests.patch
 ```
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `go test ./internal/planrun/...`
 Expected: FAIL to build — `s.Revise undefined`, `s.Review undefined`, `run.Revision undefined`, `revised.review undefined`.
 
-- [ ] **Step 3: Apply the implementation**
+- [x] **Step 3: Apply the implementation**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/04-plan-run-revision.impl.patch
 ```
 
-- [ ] **Step 4: Run the suites**
+- [x] **Step 4: Run the suites**
 
 Run: `go build ./... && go test -race ./... && (cd gnome-topbar/daemon && go test -race ./...)`
 Expected: every package `ok` in both modules.
 
-- [ ] **Step 5: Check the tree**
+- [x] **Step 5: Check the tree**
 
 Run: `bash docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/check-tree.sh 04`
 Expected: `tree OK (04)`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat(planrun): a run counts its validate_plan rounds and keeps a review record"
@@ -343,34 +343,34 @@ git commit -m "feat(planrun): a run counts its validate_plan rounds and keeps a 
 
 **Steps:**
 
-- [ ] **Step 1: Apply the tests**
+- [x] **Step 1: Apply the tests**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/05-prior-plan-findings-prompt.tests.patch
 ```
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `go test ./internal/prompts/...`
 Expected: FAIL to build — `in.PriorPlanFindings undefined`.
 
-- [ ] **Step 3: Apply the implementation**
+- [x] **Step 3: Apply the implementation**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/05-prior-plan-findings-prompt.impl.patch
 ```
 
-- [ ] **Step 4: Run the suite and check the goldens are current**
+- [x] **Step 4: Run the suite and check the goldens are current**
 
 Run: `go test -race ./internal/prompts/... && go test ./internal/prompts/... -update && git status --short internal/prompts/testdata`
 Expected: `ok`; `git status` prints nothing.
 
-- [ ] **Step 5: Check the tree**
+- [x] **Step 5: Check the tree**
 
 Run: `bash docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/check-tree.sh 05`
 Expected: `tree OK (05)`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat(prompts): the plan-level pass can be shown the earlier round's findings"
@@ -414,34 +414,34 @@ git commit -m "feat(prompts): the plan-level pass can be shown the earlier round
 
 **Steps:**
 
-- [ ] **Step 1: Apply the tests**
+- [x] **Step 1: Apply the tests**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/06-validate-plan-rounds.tests.patch
 ```
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `go test ./internal/mcpsrv/...`
 Expected: FAIL to build — `unknown field PlanRunID in struct literal of type ValidatePlanArgs`, `undefined: verdict.PlanReviewScope`, `h.newPlanRound undefined`.
 
-- [ ] **Step 3: Apply the implementation**
+- [x] **Step 3: Apply the implementation**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/06-validate-plan-rounds.impl.patch
 ```
 
-- [ ] **Step 4: Run the suites**
+- [x] **Step 4: Run the suites**
 
 Run: `go build ./... && go vet ./... && go test -race ./...`
 Expected: every package `ok`.
 
-- [ ] **Step 5: Check the tree**
+- [x] **Step 5: Check the tree**
 
 Run: `bash docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/check-tree.sh 06`
 Expected: `tree OK (06)`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat: validate_plan rounds re-review only the tasks that changed"
@@ -476,34 +476,34 @@ git commit -m "feat: validate_plan rounds re-review only the tasks that changed"
 
 **Steps:**
 
-- [ ] **Step 1: Apply the tests**
+- [x] **Step 1: Apply the tests**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/07-attach-by-title.tests.patch
 ```
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `go test ./internal/planrun/... ./internal/mcpsrv/...`
 Expected: FAIL — `SoleLiveByTitle undefined` in `planrun`; in `mcpsrv`, `TestValidateTaskSpec_AttachesByTitleToTheSingleLiveRun` and `TestValidateTaskSpec_ARevisedPlanStillHasOneRunToAttachTo` fail.
 
-- [ ] **Step 3: Apply the implementation**
+- [x] **Step 3: Apply the implementation**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/07-attach-by-title.impl.patch
 ```
 
-- [ ] **Step 4: Run the suites**
+- [x] **Step 4: Run the suites**
 
 Run: `go build ./... && go test -race ./...`
 Expected: every package `ok`.
 
-- [ ] **Step 5: Check the tree**
+- [x] **Step 5: Check the tree**
 
 Run: `bash docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/check-tree.sh 07`
 Expected: `tree OK (07)`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat: validate_task_spec attaches by title to the single live plan run"
@@ -532,28 +532,28 @@ git commit -m "feat: validate_task_spec attaches by title to the single live pla
 
 **Steps:**
 
-- [ ] **Step 1: Apply the patch**
+- [x] **Step 1: Apply the patch**
 
 ```bash
 git apply --index docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/08-docs.impl.patch
 ```
 
-- [ ] **Step 2: Check the budgets and the bundle**
+- [x] **Step 2: Check the budgets and the bundle**
 
 Run: `wc -c docs/protocol/*.md INTEGRATION.md && diff -r docs/protocol plugin/anti-tangent-protocol/protocol`
 Expected: `15904 docs/protocol/controller.md`, `15983 docs/protocol/core.md`, `15879 docs/protocol/implementer.md`, `1828 INTEGRATION.md`; `diff` prints nothing.
 
-- [ ] **Step 3: Run every suite**
+- [x] **Step 3: Run every suite**
 
 Run: `go test -race ./... && (cd gnome-topbar/daemon && go test -race ./...) && bash plugin/anti-tangent-guard/evals/run.sh | tail -1 && bash plugin/anti-tangent-guard/evals/fp-report.sh | tail -1 && bash examples/hooks/codescene-log_test.sh`
 Expected: every package `ok`; `198 passed, 0 failed`; `FALSE POSITIVES: 0`; `OK`.
 
-- [ ] **Step 4: Check the tree**
+- [x] **Step 4: Check the tree**
 
 Run: `bash docs/superpowers/plans/2026-10-04-field-data-part3-gate-cost/check-tree.sh 08`
 Expected: `tree OK (08)`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "docs: validate_plan rounds, review_scope and attach-by-title"
