@@ -62,6 +62,7 @@ func validCategory(c Category) bool {
 		CategoryTooLarge, CategoryUnverifiableCodebaseClaim,
 		CategoryConventionDeviation, CategoryAttestationContradiction,
 		CategoryContradictedCodebaseClaim,
+		CategoryCorrectness, CategoryTestAdequacy,
 		CategoryKBGap, CategoryAmbiguousPick, CategoryMissingIndexEntry,
 		CategoryInsufficientEvidence, CategoryRedundantProposal, CategoryContradictsExisting,
 		CategoryOther:
