@@ -106,3 +106,15 @@ func TestValidateCompletion_CodesceneRunWithStatsOffWritesNothing(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, "pass", env.Verdict)
 }
+
+func TestCodesceneRunKey_EqualResultsWithUnplainCategoryKeysShareAKey(t *testing.T) {
+	digest := func(path string, n int) *codescene.Digest {
+		return &codescene.Digest{Ran: true, QualityGate: "passed", CategoryCounts: map[string]int{
+			"Complex Method": 1, "Complex Method in " + path: n, "Bumpy Road: 2": 1,
+		}}
+	}
+	a := codesceneRunKey(digest("pkg/a.go", 2))
+	assert.NotEmpty(t, a)
+	assert.Equal(t, a, codesceneRunKey(digest("pkg/a.go", 2)))
+	assert.NotEqual(t, a, codesceneRunKey(digest("pkg/a.go", 3)))
+}

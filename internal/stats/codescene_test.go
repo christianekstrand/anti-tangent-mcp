@@ -2,6 +2,7 @@ package stats
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,4 +171,33 @@ func TestRunRecord_NamesOnlyTheExpectedTool(t *testing.T) {
 	assert.Equal(t, "analyze_change_set", RunRecord(codescene.Digest{}).Tool, "a digest reduced from raw output may carry no tool")
 	assert.Equal(t, "other", RunRecord(codescene.Digest{Tool: "ran it by hand on src/billing/invoice.go"}).Tool,
 		"tool is caller text and must not reach the record")
+}
+
+func TestRunRecord_CountsAKeyThatIsNotAPlainCategoryNameAsOther(t *testing.T) {
+	long := strings.Repeat("a", 41)
+	in := map[string]int{
+		"Complex Method":   2,
+		"Bumpy Road Ahead": 1,
+		"Complex Method in internal/billing/invoice.go": 3,
+		"Complex Method 2":   4,
+		long:                 5,
+		"Large Method: Load": 6,
+	}
+	sent := maps.Clone(in)
+
+	got := RunRecord(codescene.Digest{CategoryCounts: in}).CategoryCounts
+
+	assert.Equal(t, map[string]int{"Complex Method": 2, "Bumpy Road Ahead": 1, "other": 18}, got)
+	assert.Equal(t, sent, in, "the caller's map is left as sent")
+}
+
+func TestRunRecord_KeepsTheLongestPlainCategoryNameAndAddsToASentOther(t *testing.T) {
+	longest := strings.Repeat("a", 40)
+	got := RunRecord(codescene.Digest{CategoryCounts: map[string]int{longest: 1, "other": 2, "a/b": 3}}).CategoryCounts
+	assert.Equal(t, map[string]int{longest: 1, "other": 5}, got)
+}
+
+func TestRunRecord_NoCategoryCountsStaysNil(t *testing.T) {
+	assert.Nil(t, RunRecord(codescene.Digest{}).CategoryCounts)
+	assert.Nil(t, RunRecord(codescene.Digest{CategoryCounts: map[string]int{}}).CategoryCounts)
 }

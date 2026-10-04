@@ -3,6 +3,7 @@ package stats
 import (
 	"encoding/json"
 	"math"
+	"regexp"
 	"time"
 
 	"github.com/patiently/anti-tangent-mcp/internal/codescene"
@@ -65,10 +66,39 @@ type CodesceneRollup struct {
 // codesceneRunTool is the one tool name a run record carries.
 const codesceneRunTool = "analyze_change_set"
 
+// codesceneOtherCategory is the key that takes the count of every category
+// key a record does not keep.
+const codesceneOtherCategory = "other"
+
+// plainCategoryName matches a key that reads as a category name and nothing
+// more: letters and the punctuation a name uses, with no digit, path
+// separator, dot or colon, so it cannot carry a file path, a line number or a
+// function name.
+var plainCategoryName = regexp.MustCompile(`^[A-Za-z][A-Za-z ,'-]{0,39}$`)
+
+// plainCategoryCounts returns a copy of counts holding only the keys that
+// read as plain category names, with every other key's count added to
+// "other". The keys are caller text and there is no list of CodeScene's
+// category names to check them against. It returns nil for no counts.
+func plainCategoryCounts(counts map[string]int) map[string]int {
+	if len(counts) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(counts))
+	for k, n := range counts {
+		if !plainCategoryName.MatchString(k) {
+			k = codesceneOtherCategory
+		}
+		out[k] += n
+	}
+	return out
+}
+
 // RunRecord reduces d to the fields a CodesceneEvent may hold. The caller's
 // free text — skip reason, skip evidence, base ref — is left out, and so is
 // Ran: every record is a run. Tool is caller text too, so a record names the
 // tool only when it is the expected one, and says "other" for anything else.
+// Category keys are caller text as well: see plainCategoryCounts.
 func RunRecord(d codescene.Digest) codescene.Digest {
 	tool := codesceneRunTool
 	if d.Tool != "" && d.Tool != codesceneRunTool {
@@ -81,7 +111,7 @@ func RunRecord(d codescene.Digest) codescene.Digest {
 		Verdicts:       d.Verdicts,
 		Trend:          d.Trend,
 		NetPP:          d.NetPP,
-		CategoryCounts: d.CategoryCounts,
+		CategoryCounts: plainCategoryCounts(d.CategoryCounts),
 	}
 }
 
