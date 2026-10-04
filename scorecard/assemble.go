@@ -136,3 +136,19 @@ func outcomeCounts(o OutcomeLine, index int) (high, minor int) {
 	}
 	return high, minor
 }
+
+// correctnessCategory is the outcome category a correctness defect is filed
+// under. It is the same word as the reviewer's own correctness category, which
+// is what lets a task's outcome be matched against its snapshot's categories.
+const correctnessCategory = "correctness"
+
+// outcomeHasHigh reports whether o attributes a critical or major finding of
+// category to task index.
+func outcomeHasHigh(o OutcomeLine, index int, category string) bool {
+	for _, f := range o.Findings {
+		if f.TaskIndex == index && f.Category == category && (f.Severity == "critical" || f.Severity == "major") {
+			return true
+		}
+	}
+	return false
+}
