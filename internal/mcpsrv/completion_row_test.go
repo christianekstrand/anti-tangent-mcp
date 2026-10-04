@@ -108,3 +108,18 @@ func TestCompletionRowUpdate_NoDiffRetryKeepsEarlierDiffSize(t *testing.T) {
 	assert.Equal(t, 1, row.LinesAdded)
 	assert.Equal(t, 1, row.LinesRemoved)
 }
+
+func TestDiffLineCounts_FileBoundaryEndsTheHunk(t *testing.T) {
+	diff := "diff --git a/x.go b/x.go\n" +
+		"--- a/x.go\n" +
+		"+++ b/x.go\n" +
+		"@@ -1 +1 @@\n" +
+		"-old\n" +
+		"+new\n" +
+		"diff --git a/logo.png b/logo.png\n" +
+		"--- a/logo.png\n" +
+		"Binary files differ\n"
+	added, removed := diffLineCounts(diff)
+	assert.Equal(t, 1, added)
+	assert.Equal(t, 1, removed, "a later file's metadata is outside every hunk")
+}

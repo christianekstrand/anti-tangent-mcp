@@ -90,8 +90,9 @@ func (h *handlers) appendPlanLedger(runID string, row planrun.TaskRow) {
 }
 
 // diffLineCounts returns how many lines a unified diff adds and removes.
-// Only lines after the first "@@" line are counted, so a preamble such as a
-// commit message is ignored. Within the hunks, a "--- " line counts as a file
+// Only lines inside a hunk are counted: counting starts at an "@@" line and
+// stops at the next "diff --git " line, so a preamble such as a commit message
+// and a later file's metadata are both ignored. Within the hunks, a "--- " line counts as a file
 // header only when a "+++ " line follows it directly, so a removed line whose
 // own text begins with "-- " is still counted as a removal.
 func diffLineCounts(diff string) (added, removed int) {
@@ -102,6 +103,10 @@ func diffLineCounts(diff string) (added, removed int) {
 	inHunk := false
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
+		if strings.HasPrefix(line, "diff --git ") {
+			inHunk = false
+			continue
+		}
 		if !inHunk {
 			inHunk = strings.HasPrefix(line, "@@")
 			continue
