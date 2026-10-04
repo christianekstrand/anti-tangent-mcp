@@ -2513,3 +2513,24 @@ func TestRenderPost_AsksForCorrectnessBeforeCommentHygiene(t *testing.T) {
 	assert.Contains(t, out.User, "report a defect only in code the summary or an acceptance criterion ties to this task")
 	assert.Contains(t, out.User, "OR for a `correctness` or `test_adequacy` finding that meets the severity bar in its own section below")
 }
+
+func TestRenderMid_AsksForCorrectnessAndKeepsTheStyleRule(t *testing.T) {
+	out, err := RenderMid(MidInput{
+		Spec:      sampleSpec(),
+		WorkingOn: "writing the handler",
+		Files:     []File{{Path: "handlers/health.go", Content: "package handlers\n"}},
+	})
+	require.NoError(t, err)
+	style := strings.Index(out.User, "DO NOT critique code style or polish at this stage.")
+	correctness := strings.Index(out.User, "### Correctness")
+	overBuilding := strings.Index(out.User, "### Over-building")
+	require.NotEqual(t, -1, style, "the rule against style findings must stay")
+	require.NotEqual(t, -1, correctness, "prompt must have a Correctness section")
+	require.NotEqual(t, -1, overBuilding)
+	assert.Less(t, style, correctness)
+	assert.Less(t, correctness, overBuilding)
+	assert.Contains(t, out.User, "`category: correctness`")
+	assert.Contains(t, out.User, "Do not speculate about code that was not submitted")
+	assert.Contains(t, out.User, "unfinished, not wrong")
+	assert.NotContains(t, out.User, "test_adequacy", "test adequacy is judged at completion only")
+}
