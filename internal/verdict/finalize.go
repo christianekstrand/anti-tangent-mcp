@@ -11,8 +11,9 @@ import "fmt"
 // A minor finding that carries RepeatOf is left out of the minor count: it was
 // already reported on an earlier call, so it must not be what lifts a retry
 // back to warn. Only validate_completion sets RepeatOf, so every other tool's
-// minors all count. The ladder then appends a `noise_cluster` advisory finding when the `minor >= 3 → warn`
-// branch fires AND no critical/major exists. The reviewer's r.Verdict is
+// minors all count. The ladder then appends a `noise_cluster` advisory finding
+// when the `minor >= 3 → warn` branch fires AND no critical/major exists. The
+// reviewer's r.Verdict is
 // overwritten by the server-derived value. Idempotent: a second call
 // observes the noise_cluster advisory it appended and does not append again.
 func FinalizeVerdict(r Result) Result {

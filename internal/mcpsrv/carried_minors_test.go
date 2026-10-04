@@ -78,3 +78,23 @@ func TestValidateCompletion_NewMinorsSharingACriterionStillCount(t *testing.T) {
 		assert.Empty(t, f.RepeatOf)
 	}
 }
+
+func TestMarkRepeats_AnAnsweredPriorMinorIsCarriedOnce(t *testing.T) {
+	nitID := verdict.Fingerprint(verdict.CategoryQuality, "", "comment_hygiene")
+	downgradedID := verdict.Fingerprint(verdict.CategoryScopeDrift, "", "AC 2")
+	prior := []prompts.PriorFinding{
+		{Finding: verdict.Finding{ID: nitID, Severity: verdict.SeverityMinor, Category: verdict.CategoryQuality, Criterion: "comment_hygiene"}, Response: "fixed"},
+		{Finding: verdict.Finding{ID: downgradedID, Severity: verdict.SeverityMajor, Category: verdict.CategoryScopeDrift, Criterion: "AC 2"}, Response: "ruled"},
+	}
+	fs := []verdict.Finding{
+		{Severity: verdict.SeverityMinor, Category: verdict.CategoryQuality, Criterion: "comment_hygiene"},
+		{Severity: verdict.SeverityMinor, Category: verdict.CategoryQuality, Criterion: "comment_hygiene"},
+		{Severity: verdict.SeverityMinor, Category: verdict.CategoryOther, Criterion: "downgraded", SameAs: strPtr(downgradedID)},
+	}
+	shown := map[string]bool{nitID: true, downgradedID: true}
+	markRepeats(fs, prior, shown)
+
+	assert.Equal(t, nitID, fs[0].RepeatOf, "an answered prior minor is carried by the first match")
+	assert.Empty(t, fs[1].RepeatOf, "a second minor with that fingerprint is new")
+	assert.Equal(t, downgradedID, fs[2].RepeatOf, "a minor naming an answered prior major keeps its repeat mark")
+}

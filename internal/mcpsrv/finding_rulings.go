@@ -128,7 +128,8 @@ func waiveRuled(fs []verdict.Finding, taskKey string, rulings map[string]session
 }
 
 // carriedMinors is the previous call's minor findings that a minor finding
-// on this call can raise again. Each is matched once: a fingerprint is only a
+// on this call can raise again, answered or not. Each is matched once, whether
+// through take or, for an answered one, through drop: a fingerprint is only a
 // category and a criterion, and the completion prompt pins some criteria
 // (comment_hygiene, correctness), so two new findings can share a fingerprint
 // with one old one. Matching each old finding once keeps the second from
@@ -159,6 +160,19 @@ func (c *carriedMinors) take(f verdict.Finding, shown map[string]bool) string {
 	return id
 }
 
+// drop removes the prior finding with the given ID and reports whether it was
+// still there. An answered prior minor is consumed through it, so it is matched
+// once like the rest.
+func (c *carriedMinors) drop(id string) bool {
+	for i, p := range c.left {
+		if p.ID == id {
+			c.left = append(c.left[:i], c.left[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
 // markRepeats sets RepeatOf on every finding that raises a prior finding
 // again — matched by a same_as naming it, or by fingerprint — in two cases: a
 // finding of any severity when this call answered the prior one, and a minor
@@ -172,8 +186,10 @@ func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[s
 	answered := map[string]bool{}
 	answeredByFingerprint := map[string]string{}
 	var carried carriedMinors
+	priorMinor := map[string]bool{}
 	for _, p := range prior {
 		if p.Severity == verdict.SeverityMinor {
+			priorMinor[p.ID] = true
 			carried.left = append(carried.left, p)
 		}
 		if p.Response == "" {
@@ -187,11 +203,16 @@ func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[s
 	var escalate []string
 	for i := range fs {
 		f := &fs[i]
-		if id := sameAsID(*f, shown); id != "" && answered[id] {
+		id := ""
+		if named := sameAsID(*f, shown); named != "" && answered[named] {
+			id = named
+		} else {
+			id = answeredByFingerprint[fingerprintOf(*f)]
+		}
+		isMinor := f.Severity == verdict.SeverityMinor
+		if id != "" && (!isMinor || !priorMinor[id] || carried.drop(id)) {
 			f.RepeatOf = id
-		} else if id := answeredByFingerprint[fingerprintOf(*f)]; id != "" {
-			f.RepeatOf = id
-		} else if f.Severity == verdict.SeverityMinor {
+		} else if isMinor {
 			f.RepeatOf = carried.take(*f, shown)
 		}
 		f.SameAs = nil
