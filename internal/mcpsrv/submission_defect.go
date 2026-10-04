@@ -84,6 +84,14 @@ func isSubmissionDefectOnly(findings []verdict.Finding) bool {
 	return blocking > 0
 }
 
+// isEvidencedSkip reports whether d is the one CodeScene skip the server
+// accepts: declared, with a reason and with evidence. Its finding asks for
+// nothing, so a session returns it once and not on every later call.
+func isEvidencedSkip(mode string, d *codescene.Digest) bool {
+	return mode == "required" && d != nil && !d.Ran &&
+		strings.TrimSpace(d.SkipReason) != "" && strings.TrimSpace(d.SkipEvidence) != ""
+}
+
 // codesceneFindings returns the findings implied by an inbound digest.
 // mode is cfg.Codescene: "" disables the adoption check entirely, "required"
 // makes a missing or undeclared-skipped run observable. The regression finding
