@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `correctness` and `test_adequacy` finding categories for the per-task review tools. Neither is severity-floored, and a major one is an open code finding: `next_action` tells the implementer to fix and re-validate.
+- `runs.jsonl` task snapshots carry `categories` (findings per category, summed over the task's `validate_completion` calls) and `lines_added` / `lines_removed` (the size of the latest call's `final_diff`; absent when the call sent no diff). `plan-runs.jsonl` rows carry the same three fields.
 
 ### Changed
 

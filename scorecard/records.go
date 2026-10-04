@@ -52,6 +52,11 @@ type TaskSnapshot struct {
 	CodesceneState string         `json:"codescene_state,omitempty"`
 	Calls          []ToolCall     `json:"calls,omitempty"`
 	CallsDropped   int            `json:"calls_dropped,omitempty"`
+	// Categories counts the findings the task's validate_completion calls
+	// returned, per finding category, summed over the calls.
+	Categories   map[string]int `json:"categories,omitempty"`
+	LinesAdded   int            `json:"lines_added,omitempty"`
+	LinesRemoved int            `json:"lines_removed,omitempty"`
 }
 
 // RunLine is one line of runs.jsonl: a run header (Header true, Task nil) or
