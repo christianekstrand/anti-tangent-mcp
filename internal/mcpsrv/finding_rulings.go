@@ -178,8 +178,10 @@ func (c *carriedMinors) drop(id string) bool {
 // finding of any severity when this call answered the prior one, and a minor
 // finding that raises a prior minor finding, answered or not. The second case
 // is what lets FinalizeVerdict leave a carried-over nit out of the minor
-// count. An unanswered critical or major repeat stays unmarked: it is an open
-// finding, not a dispute. Returns the prior IDs the critical and major repeats
+// count. A minor takes an answered prior of any severity at most once, so a
+// fingerprint shared by several new minors cannot hide them all; critical and
+// major findings may always take it. An unanswered critical or major repeat
+// stays unmarked: it is an open finding, not a dispute. Returns the prior IDs the critical and major repeats
 // raise again, each once, in order, and clears same_as on every finding once
 // read.
 func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[string]bool) []string {
@@ -187,6 +189,7 @@ func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[s
 	answeredByFingerprint := map[string]string{}
 	var carried carriedMinors
 	priorMinor := map[string]bool{}
+	takenByMinor := map[string]bool{}
 	for _, p := range prior {
 		if p.Severity == verdict.SeverityMinor {
 			priorMinor[p.ID] = true
@@ -210,7 +213,18 @@ func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[s
 			id = answeredByFingerprint[fingerprintOf(*f)]
 		}
 		isMinor := f.Severity == verdict.SeverityMinor
-		if id != "" && (!isMinor || !priorMinor[id] || carried.drop(id)) {
+		if id != "" && isMinor {
+			if priorMinor[id] {
+				if !carried.drop(id) {
+					id = ""
+				}
+			} else if takenByMinor[id] {
+				id = ""
+			} else {
+				takenByMinor[id] = true
+			}
+		}
+		if id != "" {
 			f.RepeatOf = id
 		} else if isMinor {
 			f.RepeatOf = carried.take(*f, shown)

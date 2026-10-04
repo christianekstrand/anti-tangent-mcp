@@ -275,8 +275,10 @@ current task. When that window reaches `ANTI_TANGENT_PROGRESS_EDITS` edits
 message asking for one. The edit has already happened and is kept: exit 2 on
 `PostToolUse` hands the message to the model and undoes nothing.
 
-A task is asked once. The hook records the ask in a `progress-asked-<hash>`
-file beside the trace log, created exclusively, so edits sent in one turn —
+A task is asked once. A task here is one `validate_task_spec` call: a session
+that validates its spec again starts a new count and can be asked again. The
+hook records the ask in a `progress-asked-<hash>` file beside the trace log,
+created exclusively, so edits sent in one turn —
 whose hooks run at the same time and all read the same count — produce one
 message, not one each. The files are empty and are not removed; the hash is
 of the transcript path and the `validate_task_spec` call's id.

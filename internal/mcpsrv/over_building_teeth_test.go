@@ -144,3 +144,23 @@ func TestSnapshotRow_CarriesOverBuildingRuled(t *testing.T) {
 	require.NotNil(t, snap)
 	assert.Equal(t, 1, snap.OverBuildingRuled)
 }
+
+func TestValidateCompletion_ASessionInAPlanRunCountsItsRuledOverBuilding(t *testing.T) {
+	rv := &fakeReviewer{name: "anthropic", resp: passResp("claude-sonnet-4-6")}
+	h := &handlers{deps: newDeps(t, rv)}
+	run := titledRun(h, "Task 1: Alpha", "Task 2: Beta")
+	answered := specFor(t, h, run.ID, planrun.TaskRef{Title: "Task 1: Alpha", Index: 1}).SessionID
+	askedOnce := specFor(t, h, run.ID, planrun.TaskRef{Title: "Task 2: Beta", Index: 2}).SessionID
+
+	first := completeWith(t, h, rv, completionCallArgs(answered), reviewerFindingsResp(overBuilt))
+	completeWith(t, h, rv, completionCallArgs(askedOnce), reviewerFindingsResp(overBuilt))
+	args := completionCallArgs(answered)
+	args.FindingResponses = []FindingResponseArg{{FindingID: first.Findings[0].ID, Response: "the second product lands in the next task"}}
+	completeWith(t, h, rv, args, reviewerFindingsResp(overBuilt))
+
+	rows := rowsOf(t, h, run.ID)
+	require.Len(t, rows, 2)
+	byIndex := map[int]planrun.TaskRow{rows[0].Index: rows[0], rows[1].Index: rows[1]}
+	assert.Equal(t, 1, byIndex[1].OverBuildingRuled)
+	assert.Zero(t, byIndex[2].OverBuildingRuled)
+}

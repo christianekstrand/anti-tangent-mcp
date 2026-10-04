@@ -98,3 +98,46 @@ func TestMarkRepeats_AnAnsweredPriorMinorIsCarriedOnce(t *testing.T) {
 	assert.Empty(t, fs[1].RepeatOf, "a second minor with that fingerprint is new")
 	assert.Equal(t, downgradedID, fs[2].RepeatOf, "a minor naming an answered prior major keeps its repeat mark")
 }
+
+func TestMarkRepeats_AnAnsweredPriorMajorIsCarriedByOneMinor(t *testing.T) {
+	majorID := verdict.Fingerprint(verdict.CategoryCorrectness, "", "correctness")
+	prior := []prompts.PriorFinding{
+		{Finding: verdict.Finding{ID: majorID, Severity: verdict.SeverityMajor, Category: verdict.CategoryCorrectness, Criterion: "correctness"}, Response: "ruled"},
+	}
+	fs := []verdict.Finding{
+		{Severity: verdict.SeverityMinor, Category: verdict.CategoryCorrectness, Criterion: "correctness"},
+		{Severity: verdict.SeverityMinor, Category: verdict.CategoryCorrectness, Criterion: "correctness"},
+		{Severity: verdict.SeverityMajor, Category: verdict.CategoryCorrectness, Criterion: "correctness"},
+	}
+	escalate := markRepeats(fs, prior, map[string]bool{majorID: true})
+
+	assert.Equal(t, majorID, fs[0].RepeatOf, "the first minor takes the answered match")
+	assert.Empty(t, fs[1].RepeatOf, "a second minor is new")
+	assert.Equal(t, majorID, fs[2].RepeatOf, "a major may still take the answered match")
+	assert.Equal(t, []string{majorID}, escalate)
+}
+
+func TestValidateCompletion_AnAnsweredMajorDoesNotHideFourNewMinors(t *testing.T) {
+	h, rv := newRulingsHandlers(t)
+	sid := startTask(t, h, rv)
+	first := completeWith(t, h, rv, completionCallArgs(sid), reviewerFindingsResp(
+		findingObj("major", "correctness", "correctness", "a wrong result", "")))
+	require.Len(t, first.Findings, 1)
+
+	minor := func(evidence string) string {
+		return findingObj("minor", "correctness", "correctness", evidence, "")
+	}
+	args := completionCallArgs(sid)
+	args.FindingResponses = []FindingResponseArg{{FindingID: first.Findings[0].ID, Response: "fixed"}}
+	second := completeWith(t, h, rv, args, reviewerFindingsResp(
+		minor("a.go: one"), minor("b.go: two"), minor("c.go: three"), minor("d.go: four")))
+
+	assert.Equal(t, "warn", second.Verdict)
+	repeats := 0
+	for _, f := range second.Findings {
+		if f.RepeatOf != "" {
+			repeats++
+		}
+	}
+	assert.Equal(t, 1, repeats)
+}
