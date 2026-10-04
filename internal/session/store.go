@@ -112,6 +112,8 @@ type ReviewState struct {
 	CodesceneSkipReported bool
 	// OverBuildingAnswered mirrors Session.OverBuildingAnswered.
 	OverBuildingAnswered bool
+	// CodesceneEventKey mirrors Session.CodesceneEventKey.
+	CodesceneEventKey string
 }
 
 // ReviewState returns a copy of the session's review state.
@@ -133,6 +135,7 @@ func (s *Store) ReviewState(id string) (ReviewState, bool) {
 
 		CodesceneSkipReported: sess.CodesceneSkipReported,
 		OverBuildingAnswered:  sess.OverBuildingAnswered,
+		CodesceneEventKey:     sess.CodesceneEventKey,
 	}
 	for k := range sess.IssuedIDs {
 		st.IssuedIDs[k] = true
@@ -162,6 +165,8 @@ type ReviewUpdate struct {
 	CodesceneSkipReported bool
 	// OverBuildingAnswered sets the session's flag; false leaves it as it is.
 	OverBuildingAnswered bool
+	// CodesceneEventKey replaces the session's key; "" leaves it as it is.
+	CodesceneEventKey string
 }
 
 // ApplyReview merges u into the session under one lock, into the session as
@@ -202,6 +207,9 @@ func (s *Store) ApplyReview(id string, u ReviewUpdate) bool {
 	}
 	if u.OverBuildingAnswered {
 		sess.OverBuildingAnswered = true
+	}
+	if u.CodesceneEventKey != "" {
+		sess.CodesceneEventKey = u.CodesceneEventKey
 	}
 	sess.LastAccessed = time.Now()
 	return true

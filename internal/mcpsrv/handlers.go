@@ -1939,6 +1939,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 	var review completionReview
 	var lightweightMalformedRulingIDs []string
 	skipReported, overBuildingAnswered := false, false
+	var codesceneEventKey string
 	if lightweight {
 		// Synthesize a minimal spec for the reviewer. No session is created.
 		spec = session.TaskSpec{
@@ -1969,6 +1970,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 		review = buildCompletionReview(state, state.PreFindings, knownSessionFindings(state), responses, rulingArgs)
 		skipReported = state.CodesceneSkipReported
 		overBuildingAnswered = state.OverBuildingAnswered
+		codesceneEventKey = state.CodesceneEventKey
 	}
 
 	// 8b. Built only once no rejection can follow: evidenceCacheKey leaves
@@ -2106,6 +2108,9 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 		}
 	}
 
+	// A lightweight call has no session to remember a recorded run in, so it
+	// records the run on every call.
+	codesceneEventKey = h.recordCodesceneRun(args.Codescene, codesceneEventKey)
 	if !lightweight {
 		update := session.ReviewUpdate{
 			IssuedIDs:             envelopeIDs(env),
@@ -2113,6 +2118,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 			Escalated:             env.Escalate,
 			CodesceneSkipReported: evidencedSkip,
 			OverBuildingAnswered:  answersOverBuilding(review.prior),
+			CodesceneEventKey:     codesceneEventKey,
 		}
 		// A truncated review keeps the prior findings of the last complete one:
 		// its own list is incomplete, and a finding lost to truncation would
