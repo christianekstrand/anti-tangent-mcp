@@ -1,6 +1,6 @@
 {
   "skill_name": "anti-tangent-guard",
-  "description": "Evals for the check-task-complete PostToolUse hook, the check-comment-write PreToolUse hook, the check-task-start PreToolUse hook, and the check-progress-nudge PostToolUse hook (194 cases)",
+  "description": "Evals for the check-task-complete PostToolUse hook, the check-comment-write PreToolUse hook, the check-task-start PreToolUse hook, and the check-progress-nudge PostToolUse hook (198 cases)",
   "evals": [
     {
       "id": 1,
@@ -3140,6 +3140,50 @@
       },
       "expected_exit": 0,
       "reason": "only Edit, Write and NotebookEdit are acted on, whatever the matcher sends"
+    },
+    {
+      "id": 195,
+      "name": "comment-write-mjs-issue-ref-blocks",
+      "hook": "check-comment-write",
+      "stdin_raw": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/atg-eval.mjs\", \"content\": \"// fixes #61\\nexport const x = 1;\\n\"}}",
+      "expected_exit": 2,
+      "expected_stderr_contains": [
+        "adds comment(s) carrying change history",
+        "an issue or pull-request reference"
+      ],
+      "reason": "an .mjs file is scanned with the JavaScript rules"
+    },
+    {
+      "id": 196,
+      "name": "comment-write-kts-issue-ref-blocks",
+      "hook": "check-comment-write",
+      "stdin_raw": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/build.gradle.kts\", \"content\": \"// fixes #61\\nplugins { kotlin(\\\"jvm\\\") }\\n\"}}",
+      "expected_exit": 2,
+      "expected_stderr_contains": [
+        "adds comment(s) carrying change history",
+        "an issue or pull-request reference"
+      ],
+      "reason": "a .kts script is scanned with the Kotlin rules"
+    },
+    {
+      "id": 197,
+      "name": "comment-write-vue-script-issue-ref-blocks",
+      "hook": "check-comment-write",
+      "stdin_raw": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/Widget.vue\", \"content\": \"<template>\\n  <p>hi</p>\\n</template>\\n<script>\\n// fixes #61\\nexport default {}\\n</script>\\n\"}}",
+      "expected_exit": 2,
+      "expected_stderr_contains": [
+        "adds comment(s) carrying change history",
+        "an issue or pull-request reference"
+      ],
+      "reason": "a comment in a .vue file's script block is scanned with the JavaScript rules"
+    },
+    {
+      "id": 198,
+      "name": "comment-write-vue-template-comment-not-recognised",
+      "hook": "check-comment-write",
+      "stdin_raw": "{\"tool_name\": \"Write\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/Widget.vue\", \"content\": \"<template>\\n  <!-- fixes #61 -->\\n  <p>hi</p>\\n</template>\\n\"}}",
+      "expected_exit": 0,
+      "reason": "an HTML comment in a .vue template is not a comment form the scanner recognises: a documented limit, pinned so a change to it is deliberate"
     }
   ]
 }

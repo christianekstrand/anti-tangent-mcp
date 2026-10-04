@@ -370,6 +370,10 @@ rather than treating the reflow as separate from the touch.
   `os.path.splitext`, so a file with no extension — including this plugin's
   own extensionless `check-task-complete` and `check-comment-write` hook
   scripts — falls outside it and is not scanned by either layer.
+- A `.vue` file is scanned with the JavaScript rules throughout, its template
+  block included. The `<!-- -->` comments of that block are not a comment form
+  the scanner recognises, so a comment written there is never checked, and
+  template text after a `//` is read as a comment.
 
 Set `ANTI_TANGENT_COMMENT_GUARD=0` to disable the comment-hygiene scan at both
 write time (PreToolUse on `Edit`/`Write`) and close time (part of the

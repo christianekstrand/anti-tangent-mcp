@@ -108,7 +108,7 @@ ATG_SESSION_RAW="${ATG_META#* }"
 # extension this hook could not determine at all (no jq, no file_path, a name
 # with no extension) is not guessed at: it falls through to python3, whose
 # scannable() is the authority.
-ATG_SCAN_EXTS=".go .sh .bash .py .ts .tsx .js .jsx .rs .java .kt .rb .c .h .cc .cpp .hpp"
+ATG_SCAN_EXTS=".go .sh .bash .py .ts .tsx .js .jsx .mjs .vue .rs .java .kt .kts .rb .c .h .cc .cpp .hpp"
 if [[ -n "$ATG_EXT" && " $ATG_SCAN_EXTS " != *" $ATG_EXT "* ]]; then
     trace "skip" "ext=$ATG_EXT"
     exit 0

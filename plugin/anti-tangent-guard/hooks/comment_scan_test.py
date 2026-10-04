@@ -958,6 +958,56 @@ class StrictModeReraisesInsteadOfFailingOpen(unittest.TestCase):
         self.assertEqual(out, [], "a hook's default call must still fail open")
 
 
+class ScriptModuleAndComponentExtensions(unittest.TestCase):
+    # .mjs and .vue take the JavaScript rules, template literals included;
+    # .kts takes the Kotlin rules, in which a backtick is ordinary text.
+    def _violations(self):
+        sys.path.insert(0, HOOKS)
+        from comment_scan import violations
+        return violations
+
+    def test_the_three_extensions_are_scanned(self):
+        violations = self._violations()
+        for path in ("x.mjs", "build.gradle.kts", "Widget.vue"):
+            self.assertNotEqual(violations(path, ["// fixes #1"]), [], path)
+
+    def test_ordinary_comments_in_them_are_not_flagged(self):
+        violations = self._violations()
+        benign = {
+            "x.mjs": ["// Resolve the entry point relative to this module.",
+                      "/* Keys are sorted so the output is stable. */",
+                      " * @param {string} name - the export to look up"],
+            "build.gradle.kts": ["// The JVM target must match the toolchain below.",
+                                 " * Repositories are declared in settings.gradle.kts.",
+                                 "// version catalogs keep these numbers in one place"],
+            "Widget.vue": ["// Emitted when the user picks a row.",
+                           "/* Scoped: these rules must not leak into child components. */",
+                           " * The prop is optional; the default is an empty list."],
+        }
+        for path, lines in benign.items():
+            self.assertEqual(violations(path, lines), [], path)
+
+    def test_mjs_and_vue_template_literals_use_the_javascript_rules(self):
+        violations = self._violations()
+        for path in ("x.mjs", "Widget.vue"):
+            literal = 'const t = `\n * added in v1.2.3\n`;\n'
+            self.assertEqual(violations(path, [" * added in v1.2.3"], literal), [],
+                             "%s: text inside a template literal is not a comment" % path)
+            hole = 'const t = `text ${ a /*\n * fixes #1\n */ b } more`;\n'
+            self.assertNotEqual(violations(path, [" * fixes #1"], hole), [],
+                                "%s: a block comment inside ${} is a comment" % path)
+
+    def test_a_kts_backtick_does_not_blind_the_file(self):
+        violations = self._violations()
+        ctx = '// see `kotlin("jvm")\nplugins { }\n/**\n * fixes #1\n */\n'
+        self.assertNotEqual(violations("build.gradle.kts", [" * fixes #1"], ctx), [])
+
+    def test_a_vue_template_comment_is_not_recognised(self):
+        violations = self._violations()
+        ctx = "<template>\n  <!-- fixes #1 -->\n</template>\n"
+        self.assertEqual(violations("Widget.vue", ["  <!-- fixes #1 -->"], ctx), [])
+
+
 class TemplateInterpolationStaysCode(unittest.TestCase):
     # A ${...} hole inside a backtick span returns to CODE, so a block
     # comment written inside one is a real comment. Only the second test
