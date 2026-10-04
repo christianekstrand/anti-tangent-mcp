@@ -10,6 +10,7 @@ import (
 	"github.com/patiently/anti-tangent-mcp/internal/planrun"
 	"github.com/patiently/anti-tangent-mcp/internal/providers"
 	"github.com/patiently/anti-tangent-mcp/internal/session"
+	"github.com/patiently/anti-tangent-mcp/internal/verdict"
 )
 
 func storeAndCacheRun(h *handlers) *planrun.Run {
@@ -148,4 +149,28 @@ func TestValidateTaskSpec_ATruncatedReviewIsNotToldItWasAttached(t *testing.T) {
 	assert.Contains(t, advisories[0].Evidence, "passed no plan_run_id, but this server holds a live plan run")
 	snap, _ := h.deps.PlanRuns.Snapshot(run.ID)
 	assert.Empty(t, snap.Rows)
+}
+
+func TestWithdrawAttachedByTitle_KeepsTheFindingsPlaceAndID(t *testing.T) {
+	env := Envelope{Findings: []verdict.Finding{
+		{Severity: verdict.SeverityMinor, Category: verdict.CategoryQuality, Criterion: "naming", Evidence: "unclear name"},
+		attachedByTitleAdvisory("pr_0123456789ab"),
+	}}
+	assignEnvelopeIDs(&env)
+	reviewer, id := env.Findings[0], env.Findings[1].ID
+	require.NotEmpty(t, id)
+
+	withdrawAttachedByTitle(&env, "pr_0123456789ab")
+
+	require.Len(t, env.Findings, 2)
+	assert.Equal(t, reviewer, env.Findings[0])
+	plain := planRunIDAdvisory("pr_0123456789ab")
+	plain.ID = id
+	assert.Equal(t, plain, env.Findings[1], "a task that was not attached is not told it was")
+	assert.NotContains(t, env.Findings[1].Evidence, "was attached")
+
+	untouched := Envelope{Findings: []verdict.Finding{reviewer}}
+	withdrawAttachedByTitle(&untouched, "pr_0123456789ab")
+	assert.Equal(t, []verdict.Finding{reviewer}, untouched.Findings)
+	withdrawAttachedByTitle(&Envelope{}, "pr_0123456789ab")
 }

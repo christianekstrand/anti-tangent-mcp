@@ -261,6 +261,9 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 		} else {
 			slog.Warn("plan run attach failed; run unknown or expired",
 				"plan_run_id", planRunID, "session_id", env.SessionID)
+			if attachedByTitle {
+				withdrawAttachedByTitle(&env, planRunID)
+			}
 		}
 	}
 

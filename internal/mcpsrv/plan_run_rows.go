@@ -81,6 +81,23 @@ func attachedByTitleAdvisory(runID string) verdict.Finding {
 	}
 }
 
+// withdrawAttachedByTitle rewrites the attached-by-title advisory, env's last
+// finding, into the plain plan_run_id advisory once the attach it announced
+// has failed: the run was evicted between the title lookup and the attach.
+// The finding keeps its place and its id, which the session has already
+// recorded as issued.
+func withdrawAttachedByTitle(env *Envelope, runID string) {
+	if len(env.Findings) == 0 {
+		return
+	}
+	last := &env.Findings[len(env.Findings)-1]
+	if last.Criterion != "plan_run_id" {
+		return
+	}
+	plain := planRunIDAdvisory(runID)
+	last.Evidence, last.Suggestion = plain.Evidence, plain.Suggestion
+}
+
 // lightweightPlanRunAdvisory returns the plan-run advisory for one
 // lightweight validate_completion call: an untargeted-task notice when
 // plan_run_id named no task, or a task_index outside the run's plan. Kept
