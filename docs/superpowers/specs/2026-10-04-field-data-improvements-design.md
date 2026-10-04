@@ -1,14 +1,17 @@
 # Field-data improvements — design
 
-**Status:** design (brainstorming output), pre-implementation. The decisions in §1.3 are the
-maintainer's and are settled; §9 lists what still needs a ruling.
+**Status:** approved design, pre-implementation. The decisions in §1.3 and the rulings in §9 are
+the maintainer's and are settled; §9 also lists what is still open.
 **Date:** 2026-10-04
 **Input:** [`2026-10-04-field-data-findings.md`](2026-10-04-field-data-findings.md) — 18 days of
 opt-in stats. This spec verifies those findings against the code and the raw files (§2) before
 designing from them.
-**Release vehicle:** three parts, three releases. Part 1 is `version/0.27.0` (backward-compatible
-minor; released is 0.26.0, and no `version/*` branch above 0.25.0 is in flight). Parts 2 and 3
-are expected to be 0.28.0 and 0.29.0, each with its own plan.
+**Release vehicle:** one release, `0.27.0` (backward-compatible minor; released is 0.26.0, and no
+`version/*` branch above 0.25.0 is in flight), built as three parts. Each part has its own
+workspace, its own agent and its own plan, and merges into `version/0.27.0`; the single pull
+request from `version/0.27.0` to `main`, titled `[minor]`, is the release. A part starts only when
+the part before it has passed review: a new workspace is cut from `version/0.27.0` and a new agent
+there writes that part's plan from this spec and implements it.
 
 ---
 
@@ -196,14 +199,15 @@ means the hook is not registered on this host, not that records were lost.
 
 Ordered by expected effect on the escape rate.
 
-| Part | Release | Contents (improvement numbers from the findings file) | Why here |
-|---|---|---|---|
-| 1 | 0.27.0 | 1 (correctness review); 4 (scorecard inputs); the measurement half of 8 (code size per task) | The only change aimed directly at the escapes, shipped with the measurements needed to judge it. Recording code size now gives Part 2 a before-number. |
-| 2 | 0.28.0 | 6 (automatic `check_progress`); 2 (non-resolving repeats); the teeth half of 8; 7 (comment guard extensions) | Indirect effect: defects caught mid-task, and reviewer output not spent on findings that cannot resolve. |
-| 3 | 0.29.0 | 3 (`validate_plan` convergence); 5 (checklist); 8d (CodeScene event channel) | Cost and latency. No expected effect on escapes. |
+| Part | Contents (improvement numbers from the findings file) | Why here |
+|---|---|---|
+| 1 | 1 (correctness review); 4 (scorecard inputs); the measurement half of 8 (code size per task) | The only change aimed directly at the escapes, shipped with the measurements needed to judge it. Recording code size now gives Part 2 a before-number. |
+| 2 | 6 (automatic `check_progress`); 2 (non-resolving repeats); the teeth half of 8; 7 (comment guard extensions) | Indirect effect: defects caught mid-task, and reviewer output not spent on findings that cannot resolve. |
+| 3 | 3 (`validate_plan` convergence); 5 (checklist); 8d (CodeScene event channel) | Cost and latency. No expected effect on escapes. |
 
-Each part is planned and released on its own, so the scorecard's regression flag compares one
-change at a time. Part 1 has a plan: `docs/superpowers/plans/2026-10-04-field-data-part1-correctness-and-scorecard.md`.
+The parts are built in this order and released together. The scorecard's regression flag therefore
+compares 0.27.0 as a whole with 0.26.0 and cannot separate the parts; each part's own effect is
+read from the part-specific measures in §3.1. Part 1 has a plan: `docs/superpowers/plans/2026-10-04-field-data-part1-correctness-and-scorecard.md`.
 
 ### 3.1 Success measures
 
@@ -216,7 +220,7 @@ Baselines are the 0.26.0 numbers in §2.
 | 1 | Share of scored tasks in the `unknown` implementer cohort | 38/189 (20%) | Under 5%. |
 | 1 | Guard rails: `unconfirmed_flag_rate`, `calls_per_task` | 29/37; 3.24 | No rise in `calls_per_task` above 4.0. A rise in flags that the final review does not confirm means the correctness prompt is speculating. |
 | 2 | Tasks with at least one checkpoint | 4/193 | Over half of the tasks that reach the edit threshold. |
-| 2 | `codescene_skipped` on a call after the first in a session | 55 of 62 | None for an evidenced skip. |
+| 2 | `codescene_skipped` on a call after the first in a session | 55 of 62 | None for an evidenced skip; an unevidenced one still repeats, by design. |
 | 2 | `over_building` cleared or ruled on the next call | 6/20 | Over 80%. |
 | 2 | Lines added per task (recorded from Part 1) | first recorded in 0.27.0 | Direction only. |
 | 3 | `validate_plan` calls per plan session; run headers without rows | median 4; 99/127 | Median 2 or fewer; near zero. |
@@ -236,7 +240,7 @@ to fix and re-validate. The plan, prime and extract schemas gain the same two en
 reviewer schemas' category enums identical; no prompt for those tools asks for them.
 
 The category enum is shared by the three per-task tools. Only `post.tmpl` asks for the new
-categories in Part 1; a `check_progress` clause is a Part 2 question (§9, question 6).
+categories in Part 1; `mid.tmpl` follows in Part 2 (§5.1).
 
 ### 4.2 The completion prompt
 
@@ -339,17 +343,18 @@ Python body (`hooks/check_progress_nudge.py`) owning the transcript work.
 - **Window:** from the last `validate_task_spec` call in that transcript. No such call means no
   task and no nudge, which also exempts lightweight tasks. A `validate_completion` call after it
   means the task is in its completion loop, and fix-up edits are not nudged.
-- **Rule:** count the gated edits since the later of that `validate_task_spec` and the last
-  `check_progress`. When the count is a multiple of N, exit 2 with a message telling the
-  implementer to call `check_progress` with the files changed so far. The edit has already
+- **Rule:** once per task. Count the gated edits since that `validate_task_spec`. When the count
+  reaches N and the window holds no `check_progress` call, exit 2 with a message telling the
+  implementer to call `check_progress` with the files changed so far. Once the window holds a
+  `check_progress` call the hook is silent for the rest of the task. The edit has already
   happened; exit 2 on `PostToolUse` returns the message to the model without undoing anything.
 - **Switches:** `ANTI_TANGENT_PROGRESS_GUARD=0` turns the hook off.
   `ANTI_TANGENT_PROGRESS_EDITS` sets N; an unusable value falls back to the default.
 - **Failure:** every error allows. No transcript, no python, malformed payload: exit 0.
 - **Trace:** `progress | pass|nudge|skip | edits=N` in the existing trace log.
 
-**Threshold.** N = 10, counted since the last checkpoint, so a long task is asked again every ten
-edits and a task under ten edits never is. The stats tune it two ways. The trace's largest
+**Threshold.** N = 10: a task is asked once, at its tenth edit, and a task under ten edits never
+is. The stats tune it two ways. The trace's largest
 `edits=` per window gives the distribution of edits per task: N should sit near its median, so
 about half of tasks get one checkpoint. And `checkpoints` on the task rows, joined to outcomes,
 gives the escape rate with and without a checkpoint, while the `check_progress` events give its
@@ -358,6 +363,10 @@ verdict mix: if more than four in five nudged checkpoints return a clean pass, r
 **Protocol.** `implementer.md` currently calls `check_progress` optional and low-signal (§2,
 row 7). That text changes to "when the guard asks, or when you suspect drift", as a replacement
 within the file's 46 bytes of headroom, with the bundle resynced.
+
+**Correctness mid-task.** `mid.tmpl` gains a short form of the completion prompt's Correctness
+section (§4.2), so the checkpoint the hook asks for also looks for defects while they are cheap
+to fix. It keeps its rule against style and polish findings.
 
 ### 5.2 Findings that repeat without resolving
 
@@ -417,7 +426,7 @@ from it.
 
 Either the server appends a record to `codescene-events.jsonl` for each in-band `ran` digest and
 the hook is retired, or the two channels stay and the documentation says an empty file is normal.
-Question 5 in §9.
+Still open: §9.
 
 ---
 
@@ -441,26 +450,27 @@ Question 5 in §9.
 - The effect of the prompt change is not unit-testable. It is judged on the field measures in
   §3.1.
 
-## 9. Open questions for the maintainer
+## 9. Rulings and what is still open
 
-1. **Unevidenced CodeScene skip.** The agreed list says "accept a stated CodeScene skip reason
-   once". The code grades a reason without evidence as major on purpose (§2.2). §5.2 accepts only
-   an **evidenced** skip once and leaves the unevidenced case major. Accepting a bare reason
-   reverses that design decision. Which is wanted?
-2. **One plan per part.** The plan written with this spec covers Part 1 only, on the reading that
-   each part is its own release. The earlier field-assessment work merged parts and released once.
-   Confirm three releases.
-3. **Baseline choice (§4.5).** Preferring a same-model baseline changes what the regression flag
-   compares. Acceptable?
-4. **`check_progress` cadence and scope (§5.1).** Every ten edits or once per task; and main
-   sessions as well as dispatched subagents?
-5. **CodeScene event channel (§6.3).** Server-written records, or document the two channels?
-6. **Correctness at `check_progress`.** Should `mid.tmpl` also ask for correctness defects once
-   the hook makes mid-task checks common, or stay drift-only?
-7. **Retry cost.** A correctness review will produce more non-pass verdicts. §3.1 proposes 4.0
-   calls per task as the limit before the prompt is tightened. Is that the right limit?
-8. **Checklist (§6.2).** Move it out of findings, or keep it a finding and only narrow what
-   qualifies?
-9. **The findings file** is committed as written. Where its numbers differ from §2 (pass escape
-   rate, passes carrying findings, unattributed findings, plan sessions), §2 is the corrected
-   figure. Should the file be amended instead?
+The maintainer ruled on the open questions on 2026-10-04:
+
+1. **Unevidenced CodeScene skip.** Not accepted. A skip with a reason and no evidence stays major;
+   only an evidenced skip is reported once (§5.2).
+2. **Release.** One release carrying all three parts; one workspace and agent per part; a part
+   starts when the part before it has passed review (header, §3).
+3. **Baseline choice (§4.5).** Approved.
+4. **`check_progress` cadence (§5.1).** Once per task.
+5. **Correctness at `check_progress`.** Yes: `mid.tmpl` asks for correctness defects (§5.1).
+6. **Retry cost.** 4.0 calls per task is the limit before the correctness prompt is tightened
+   (§3.1).
+7. **Checklist (§6.2).** It moves out of the findings.
+8. **The findings file** is amended to the figures in §2.
+9. **Category enum.** The two categories go into all six reviewer schemas (§4.1).
+
+Still open:
+
+- **CodeScene event channel (§6.3).** Whether the server writes the records itself or the
+  documentation explains the two channels. It is a Part 3 item and blocks nothing before it.
+- **`check_progress` scope (§5.1).** The design nudges main sessions as well as dispatched
+  subagents. The cadence was ruled on; the scope was not, and is taken as designed unless ruled
+  otherwise.

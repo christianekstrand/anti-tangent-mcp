@@ -12,9 +12,9 @@
 
 ## Global Constraints
 
-- **Branch.** This plan was written on `feature/field-data-improvements`. Implement it on a branch named `version/0.27.0`, cut from that branch's tip: CI requires the branch's `X.Y.Z` to match a `## [X.Y.Z] - YYYY-MM-DD` heading in `CHANGELOG.md`. No `version/*` branch above 0.25.0 was in flight on 2026-10-04 and 0.26.0 is released; re-check `git branch -r | grep version/` before cutting, and take the next free minor if 0.27.0 is taken. Do **not** edit `VERSION`; the release workflow bumps it. The merge commit into `main` carries `[minor]`.
+- **Branch and release.** All three parts of the spec ship as one release, 0.27.0, and the release branch must be named `version/0.27.0`: CI requires a `version/X.Y.Z` branch whose `X.Y.Z` matches a `## [X.Y.Z] - YYYY-MM-DD` heading in `CHANGELOG.md`. This plan was written on `feature/field-data-improvements`, which is Part 1's workspace branch and is not a release branch. Before Task 1, create `version/0.27.0` from this branch's current tip (`git branch version/0.27.0`; do not check it out in a worktree while another holds it). Part 1 is implemented on `feature/field-data-improvements` and its pull request targets `version/0.27.0`, never `main`. Parts 2 and 3 do the same from their own workspaces. The one pull request from `version/0.27.0` to `main`, titled `[minor]`, is the release, and is opened only after Part 3. No `version/*` branch above 0.25.0 was in flight on 2026-10-04 and 0.26.0 is released; re-check `git branch -r | grep version/` first, and take the next free minor if 0.27.0 is taken. Do **not** edit `VERSION`; the release workflow bumps it. CodeRabbit does not auto-review a pull request whose base is not `main`: ask it with a `@coderabbitai review` comment each round.
 - **Do not gate this plan with anti-tangent.** It changes the tool. Skip `validate_plan`, `validate_task_spec`, `check_progress` and `validate_completion` for every task here. Subagent-driven spec and code-quality review is the gate.
-- **Changelog.** Task 1 creates `## [0.27.0] - 2026-10-04` in `CHANGELOG.md`. Every later task that changes user-visible behaviour adds its bullet under that heading's `### Added` or `### Changed`, in the same commit as the code.
+- **Changelog.** Task 1 creates `## [0.27.0] - 2026-10-04` in `CHANGELOG.md`; it is the one entry all three parts share. Every later task that changes user-visible behaviour adds its bullet under that heading's `### Added` or `### Changed`, in the same commit as the code.
 - **Content-free records.** `runs.jsonl`, `outcomes.jsonl`, `scorecard.json` and `events.jsonl` hold counts, verdicts, model ids and anti-tangent's own category names. Nothing in this plan may add a task title, plan heading, file path, finding text or raw id to them.
 - **Public repo.** No consumer ticket id, file name, plan title or task title from the field data appears in code, tests, docs or commit messages. Test fixtures use invented names.
 - **The server stays advisory.** No change here rejects a call or blocks a caller. `record_review_outcome` reports a gap in its result, never as an error.
@@ -30,7 +30,10 @@
 - `codescene_not_run` stays verdict-driving.
 - Agents circling back to fix findings is wanted; the target is findings that repeat without resolving.
 - Lean guidance gets a measurement (code size per task; recorded in this plan) and teeth (Part 2).
-- The improvements ship in parts; Part 1 is the correctness review plus the scorecard inputs.
+- The improvements are built in three parts and shipped as one release. Part 1 is the correctness review plus the scorecard inputs. Each part has its own workspace and agent; the next part starts when this one has passed review.
+- The scorecard baseline prefers an earlier cohort with the same review and implementer models.
+- The two new categories go into all six reviewer schemas.
+- 4.0 calls per task is the limit before the correctness prompt is tightened.
 
 ---
 
@@ -1555,4 +1558,4 @@ Tasks 1 → 2 (the prompt names the categories Task 1 adds). Task 3 → 5 (the m
 
 - The final whole-plan review is the gate before the PR. Because the plan is not run under anti-tangent, there is no `plan_run_id` and no `record_review_outcome` call for it.
 - The effect of Task 2 cannot be shown by a test. It is read from the field after release, against the measures in the spec's §3.1: `escape_rate` and `correctness_flag_recall` for the 0.27.0 cohorts, with `unconfirmed_flag_rate` and `calls_per_task` as the guard rails.
-- Parts 2 and 3 of the spec each need their own plan and their own `version/X.Y.Z` branch.
+- When Part 1 has passed its final review and merged into `version/0.27.0`, Part 2 gets a new workspace cut from `version/0.27.0` and a new agent in it, which writes Part 2's plan from the spec and implements it. Part 3 follows the same way after Part 2.
