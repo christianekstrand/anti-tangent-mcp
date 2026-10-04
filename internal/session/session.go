@@ -102,4 +102,9 @@ type Session struct {
 	// cleared. Nothing the implementer does clears that finding, so it is
 	// returned once.
 	CodesceneSkipReported bool
+	// OverBuildingAnswered is set once a validate_completion on the session
+	// carried a finding_responses answer to an over_building finding, and
+	// never cleared: an answer is sent once, and must still stand on the
+	// calls after it.
+	OverBuildingAnswered bool
 }

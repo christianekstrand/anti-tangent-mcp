@@ -228,3 +228,12 @@ func TestStore_CodesceneSkipReportedIsSticky(t *testing.T) {
 	st, _ = s.ReviewState(sess.ID)
 	assert.True(t, st.CodesceneSkipReported, "a later review that reports no skip must not clear the flag")
 }
+
+func TestStore_OverBuildingAnsweredIsSticky(t *testing.T) {
+	s := NewStore(time.Hour)
+	sess := s.Create(TaskSpec{Title: "t"}, "")
+	require.True(t, s.ApplyReview(sess.ID, ReviewUpdate{OverBuildingAnswered: true}))
+	require.True(t, s.ApplyReview(sess.ID, ReviewUpdate{}))
+	st, _ := s.ReviewState(sess.ID)
+	assert.True(t, st.OverBuildingAnswered, "an answer sent once must still stand after later reviews")
+}

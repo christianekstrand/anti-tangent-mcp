@@ -110,6 +110,8 @@ type ReviewState struct {
 	CheckpointFindings [][]verdict.Finding
 	// CodesceneSkipReported mirrors Session.CodesceneSkipReported.
 	CodesceneSkipReported bool
+	// OverBuildingAnswered mirrors Session.OverBuildingAnswered.
+	OverBuildingAnswered bool
 }
 
 // ReviewState returns a copy of the session's review state.
@@ -130,6 +132,7 @@ func (s *Store) ReviewState(id string) (ReviewState, bool) {
 		CheckpointFindings: make([][]verdict.Finding, len(sess.Checkpoints)),
 
 		CodesceneSkipReported: sess.CodesceneSkipReported,
+		OverBuildingAnswered:  sess.OverBuildingAnswered,
 	}
 	for k := range sess.IssuedIDs {
 		st.IssuedIDs[k] = true
@@ -157,6 +160,8 @@ type ReviewUpdate struct {
 	Escalated bool
 	// CodesceneSkipReported sets the session's flag; false leaves it as it is.
 	CodesceneSkipReported bool
+	// OverBuildingAnswered sets the session's flag; false leaves it as it is.
+	OverBuildingAnswered bool
 }
 
 // ApplyReview merges u into the session under one lock, into the session as
@@ -194,6 +199,9 @@ func (s *Store) ApplyReview(id string, u ReviewUpdate) bool {
 	}
 	if u.CodesceneSkipReported {
 		sess.CodesceneSkipReported = true
+	}
+	if u.OverBuildingAnswered {
+		sess.OverBuildingAnswered = true
 	}
 	sess.LastAccessed = time.Now()
 	return true

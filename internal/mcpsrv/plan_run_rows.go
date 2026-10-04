@@ -176,6 +176,18 @@ func completionRowUpdate(env Envelope, cs *codescene.Digest, finalDiff string) f
 	}
 }
 
+// countOverBuildingRuled wraps a row update so it also counts a call whose
+// over_building finding was settled by an answer or a ruling.
+func countOverBuildingRuled(update func(*planrun.TaskRow), ruled bool) func(*planrun.TaskRow) {
+	if !ruled {
+		return update
+	}
+	return func(row *planrun.TaskRow) {
+		update(row)
+		row.OverBuildingRuled++
+	}
+}
+
 // recordCheckpointRow increments the plan-run row's checkpoint count for a
 // session-backed check_progress call and writes the updated row to the plan
 // ledger. Best effort: an unknown run or row logs a warning and never
@@ -200,11 +212,12 @@ func (h *handlers) recordCheckpointRow(sess *session.Session, env Envelope) {
 // validate_completion call and writes the updated row to the plan ledger.
 // Best effort: an unknown run or row logs a warning and never changes the
 // result. A no-op when sess carries no plan run.
-func (h *handlers) recordCompletionRow(sess *session.Session, env Envelope, cs *codescene.Digest, finalDiff string) {
+func (h *handlers) recordCompletionRow(sess *session.Session, env Envelope, cs *codescene.Digest, finalDiff string, overBuildingRuled bool) {
 	if sess.PlanRunID == "" {
 		return
 	}
-	if row, ok := h.deps.PlanRuns.UpdateRow(sess.PlanRunID, sess.ID, completionRowUpdate(env, cs, finalDiff)); ok {
+	update := countOverBuildingRuled(completionRowUpdate(env, cs, finalDiff), overBuildingRuled)
+	if row, ok := h.deps.PlanRuns.UpdateRow(sess.PlanRunID, sess.ID, update); ok {
 		h.appendPlanLedger(sess.PlanRunID, row)
 	} else {
 		slog.Warn("plan run row update failed; run or row unknown",
@@ -217,12 +230,13 @@ func (h *handlers) recordCompletionRow(sess *session.Session, env Envelope, cs *
 // Best effort: an unknown or expired run, or a call naming no task, logs a
 // warning and never changes the result. A no-op when args carries no
 // plan_run_id.
-func (h *handlers) recordLightweightCompletionRow(args ValidateCompletionArgs, env Envelope) {
+func (h *handlers) recordLightweightCompletionRow(args ValidateCompletionArgs, env Envelope, overBuildingRuled bool) {
 	if args.PlanRunID == "" {
 		return
 	}
 	ref := planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle}
-	if row, ok := h.deps.PlanRuns.UpsertLite(args.PlanRunID, ref, completionRowUpdate(env, args.Codescene, args.FinalDiff)); ok {
+	update := countOverBuildingRuled(completionRowUpdate(env, args.Codescene, args.FinalDiff), overBuildingRuled)
+	if row, ok := h.deps.PlanRuns.UpsertLite(args.PlanRunID, ref, update); ok {
 		h.appendPlanLedger(args.PlanRunID, row)
 	} else {
 		slog.Warn("plan run lightweight update skipped; run unknown or expired, or no task named",
