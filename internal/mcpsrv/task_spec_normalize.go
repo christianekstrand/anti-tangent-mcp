@@ -9,15 +9,14 @@ import (
 )
 
 // taskSpecListedFiles returns the paths the task's own Files: section lists:
-// the ones a Files: section in the caller's Context names, and the ones the
-// named plan run recorded for the task from the plan.
-func (h *handlers) taskSpecListedFiles(args ValidateTaskSpecArgs) []string {
-	files := planparser.ListedPaths(args.Context)
-	if args.PlanRunID == "" {
+// the ones a Files: section in the caller's Context names, and the ones plan
+// run planRunID recorded for the task from the plan.
+func (h *handlers) taskSpecListedFiles(context, planRunID string, ref planrun.TaskRef) []string {
+	files := planparser.ListedPaths(context)
+	if planRunID == "" {
 		return files
 	}
-	ref := planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle}
-	return append(files, h.deps.PlanRuns.TaskFiles(args.PlanRunID, ref)...)
+	return append(files, h.deps.PlanRuns.TaskFiles(planRunID, ref)...)
 }
 
 // taskSpecChecklistNextAction is appended to validate_task_spec's next_action

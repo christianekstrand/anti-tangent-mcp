@@ -36,11 +36,27 @@ func (h *handlers) taskIndexAdvisory(runID string, index int) (verdict.Finding, 
 	}, true
 }
 
+// taskSpecPlanRun returns the plan run a validate_task_spec call belongs to:
+// the one it names, else the server's single live run when the task's title
+// matches one of that run's headings. byTitle reports the second case. A
+// truncated review creates no session and so attaches to nothing: it finds
+// no run by title.
+func (h *handlers) taskSpecPlanRun(args ValidateTaskSpecArgs, truncated bool) (runID string, byTitle bool) {
+	if args.PlanRunID != "" || truncated {
+		return args.PlanRunID, false
+	}
+	return h.deps.PlanRuns.SoleLiveByTitle(args.TaskTitle)
+}
+
 // taskSpecPlanRunAdvisory returns the plan-run advisory for one
-// validate_task_spec call: it names the latest live run when the call passed
-// no plan_run_id, or flags a task_index outside the named run's plan. Kept
-// out of ValidateTaskSpec so its branch count stays down.
-func (h *handlers) taskSpecPlanRunAdvisory(planRunID string, taskIndex int) (verdict.Finding, bool) {
+// validate_task_spec call. A call that named no run is told which run it was
+// attached to by title, or else which live run it could have named; a call
+// that named one is told when its task_index is outside that run's plan.
+// Kept out of ValidateTaskSpec so its branch count stays down.
+func (h *handlers) taskSpecPlanRunAdvisory(planRunID string, byTitle bool, taskIndex int) (verdict.Finding, bool) {
+	if byTitle {
+		return attachedByTitleAdvisory(planRunID), true
+	}
 	if planRunID == "" {
 		if run, ok := h.deps.PlanRuns.Latest(); ok {
 			return planRunIDAdvisory(run.ID), true
@@ -48,6 +64,21 @@ func (h *handlers) taskSpecPlanRunAdvisory(planRunID string, taskIndex int) (ver
 		return verdict.Finding{}, false
 	}
 	return h.taskIndexAdvisory(planRunID, taskIndex)
+}
+
+// attachedByTitleAdvisory tells a validate_task_spec caller that passed no
+// plan_run_id which run its task was attached to. It describes the call's
+// arguments, not the task, so it is appended after the verdict is finalized.
+func attachedByTitleAdvisory(runID string) verdict.Finding {
+	return verdict.Finding{
+		Severity:  verdict.SeverityMinor,
+		Category:  verdict.CategoryOther,
+		Criterion: "plan_run_id",
+		Evidence: fmt.Sprintf("This call passed no plan_run_id. Its task_title matches one task of the only live plan run "+
+			"on this server, %s, so the task was attached to that run.", runID),
+		Suggestion: fmt.Sprintf("Pass plan_run_id=%s on validate_task_spec: a server holding two live runs, or a title "+
+			"that matches no plan heading, attaches nothing. Ignore this if the task is not part of that plan.", runID),
+	}
 }
 
 // lightweightPlanRunAdvisory returns the plan-run advisory for one

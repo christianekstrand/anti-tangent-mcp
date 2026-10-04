@@ -500,3 +500,44 @@ func TestRevise_KeepsTheIDAndRowsAndCountsTheRound(t *testing.T) {
 	assert.False(t, ok)
 	assert.False(t, s.SetReview("pr_unknown", "x"))
 }
+
+func TestSoleLiveByTitle(t *testing.T) {
+	var none *Store
+	_, ok := none.SoleLiveByTitle("Store")
+	assert.False(t, ok, "a nil store holds no run")
+
+	s := NewStore(time.Hour)
+	_, ok = s.SoleLiveByTitle("Store")
+	assert.False(t, ok)
+
+	run := s.CreateWithTasks("pass", "rigorous", []PlanTask{
+		{Index: 1, Title: "Task 1: Store"}, {Index: 2, Title: "Task 2: Cache"}, {Index: 3, Title: "Task 3: Cache"},
+	})
+	s.mu.Lock()
+	seen := time.Now().Add(-time.Minute)
+	s.runs[run.ID].LastAccessed = seen
+	s.mu.Unlock()
+	id, ok := s.SoleLiveByTitle("task 1:  store")
+	require.True(t, ok)
+	assert.Equal(t, run.ID, id)
+	s.mu.Lock()
+	assert.Equal(t, seen, s.runs[run.ID].LastAccessed, "naming a run in a lookup must not keep it alive")
+	s.mu.Unlock()
+	_, ok = s.SoleLiveByTitle("Cache")
+	assert.False(t, ok, "a title two headings share names no task")
+	_, ok = s.SoleLiveByTitle("Other")
+	assert.False(t, ok)
+	_, ok = s.SoleLiveByTitle("")
+	assert.False(t, ok)
+
+	stale := s.CreateWithTasks("pass", "rigorous", []PlanTask{{Index: 1, Title: "Task 1: Store"}})
+	_, ok = s.SoleLiveByTitle("Store")
+	assert.False(t, ok, "two live runs: no guess")
+
+	s.mu.Lock()
+	s.runs[stale.ID].LastAccessed = time.Now().Add(-2 * time.Hour)
+	s.mu.Unlock()
+	id, ok = s.SoleLiveByTitle("Store")
+	require.True(t, ok, "a run idle past the TTL is not live")
+	assert.Equal(t, run.ID, id)
+}

@@ -106,7 +106,7 @@ type ValidateTaskSpecArgs struct {
 	MaxTokensOverride            int                               `json:"max_tokens_override,omitempty" jsonschema:"Reviewer output-token budget for this call only. 0 uses the configured default; a value above ANTI_TANGENT_MAX_TOKENS_CEILING is clamped with a minor finding; a negative value is rejected."`
 	// PlanRunID ties this task to a plan run minted by validate_plan. Best
 	// effort: an unknown or expired id must not fail the review.
-	PlanRunID    string   `json:"plan_run_id,omitempty" jsonschema:"The plan_run_id from the controller's final passing validate_plan call. It attaches this task to that plan run so plan_run_report can include it; an unknown or expired id does not fail the call."`
+	PlanRunID    string   `json:"plan_run_id,omitempty" jsonschema:"The plan_run_id from the controller's final passing validate_plan call. It attaches this task to that plan run so plan_run_report can include it; an unknown or expired id does not fail the call. Left out, the task is attached only when this server holds exactly one live plan run and task_title matches exactly one of its headings."`
 	ContextPaths []string `json:"context_paths,omitempty" jsonschema:"Absolute paths to files the implementer was told to work from, such as its dispatch brief: the server reads them and shows the reviewer their whole contents, so a term or step they define is not reported as missing from the spec. With ANTI_TANGENT_PLAN_ROOTS set each path must be under one of those roots. At most 50 files, each within ANTI_TANGENT_CONTEXT_MAX_FILE_BYTES and together within ANTI_TANGENT_CONTEXT_MAX_PAYLOAD_BYTES; they do not count toward the task-spec payload cap."`
 	TaskIndex    int      `json:"task_index,omitempty" jsonschema:"The task's 1-based position in the plan, from the controller's dispatch. With plan_run_id it names the plan task this call belongs to; without it the task is found by matching task_title against the plan's headings. Validating the same task again updates its plan_run_report row instead of adding one."`
 }
@@ -192,7 +192,15 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 	result := out.Result
 	result.Findings = suppressTestabilityExtractionScopeDrift(result.Findings, inputs.TestabilityExtractions)
 	result.Findings = suppressUnverifiableCodebaseClaim(result.Findings, inputs.ControllerVerifiedReferences)
-	result.Findings = dropListedFileClaims(result.Findings, h.taskSpecListedFiles(args))
+	planRunID, attachedByTitle := h.taskSpecPlanRun(args, out.Truncated)
+	taskRef := planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle}
+	if attachedByTitle {
+		// The title is what found the run and the task, so it alone names
+		// the row: a task_index sent without a run was never checked against
+		// this plan.
+		taskRef.Index = 0
+	}
+	result.Findings = dropListedFileClaims(result.Findings, h.taskSpecListedFiles(args.Context, planRunID, taskRef))
 	var checklist []string
 	result.Findings, checklist = splitTaskSpecChecklist(result.Findings)
 	result.Findings = withServerFindings(cc.Clamp, result.Findings, out.Server)
@@ -219,7 +227,7 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 		env.NextAction += taskSpecChecklistNextAction
 	}
 
-	if f, ok := h.taskSpecPlanRunAdvisory(args.PlanRunID, args.TaskIndex); ok {
+	if f, ok := h.taskSpecPlanRunAdvisory(planRunID, attachedByTitle, args.TaskIndex); ok {
 		env.Findings = append(env.Findings, f)
 	}
 	assignEnvelopeIDs(&env)
@@ -229,7 +237,7 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 	// failed review has already returned above, so it leaves no orphan session
 	// waiting for TTL eviction either.
 	if !out.Truncated {
-		sess := h.deps.Sessions.Create(spec, args.PlanRunID)
+		sess := h.deps.Sessions.Create(spec, planRunID)
 		// The plan_run_id advisory describes this call's arguments, not the
 		// spec, so later prompts must not show it as a pre-task finding.
 		h.deps.Sessions.SetPreFindings(sess.ID, append([]verdict.Finding(nil), env.Findings[:len(result.Findings)]...))
@@ -242,18 +250,17 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 		env = h.withSessionTTL(env, sess)
 	}
 
-	if args.PlanRunID != "" && env.SessionID != "" {
+	if planRunID != "" && env.SessionID != "" {
 		// Best-effort: an unknown or expired run must not fail the review.
-		ref := planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle}
-		if row, ok := h.deps.PlanRuns.Attach(args.PlanRunID, env.SessionID, ref, env.Verdict); ok {
+		if row, ok := h.deps.PlanRuns.Attach(planRunID, env.SessionID, taskRef, env.Verdict); ok {
 			call := callFromEnvelope("validate_task_spec", env)
-			if logged, ok := h.deps.PlanRuns.UpdateRow(args.PlanRunID, env.SessionID, func(r *planrun.TaskRow) { r.AppendCall(call) }); ok {
+			if logged, ok := h.deps.PlanRuns.UpdateRow(planRunID, env.SessionID, func(r *planrun.TaskRow) { r.AppendCall(call) }); ok {
 				row = logged
 			}
-			h.appendPlanLedger(args.PlanRunID, row)
+			h.appendPlanLedger(planRunID, row)
 		} else {
 			slog.Warn("plan run attach failed; run unknown or expired",
-				"plan_run_id", args.PlanRunID, "session_id", env.SessionID)
+				"plan_run_id", planRunID, "session_id", env.SessionID)
 		}
 	}
 
@@ -835,8 +842,9 @@ func prependPlanDeprecation(pr verdict.PlanResult, usedPlanText bool) verdict.Pl
 // planRunIDAdvisory tells a validate_task_spec caller that this server holds a
 // live plan run the call did not name. It describes the call's arguments, not
 // the task, so it is appended after the verdict is finalized and must never
-// move it. It names the most recently created run because every validate_plan
-// round mints a new id and supersedes the previous one.
+// move it. It names the most recently created run: a controller that named no
+// run on its later validate_plan rounds minted one per round, and the last is
+// the one it dispatched from.
 func planRunIDAdvisory(runID string) verdict.Finding {
 	return verdict.Finding{
 		Severity:  verdict.SeverityMinor,

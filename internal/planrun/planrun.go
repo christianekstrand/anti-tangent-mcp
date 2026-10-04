@@ -432,6 +432,35 @@ func (s *Store) Latest() (*Run, bool) {
 	return latest, latest != nil
 }
 
+// SoleLiveByTitle returns the id of the server's single live run when title
+// matches exactly one of that run's plan headings. It reports false when no
+// run, or more than one, has been used within the TTL, or the title matches
+// no heading or several: a guess between two runs or two tasks would attach
+// a task to the wrong row. It does not refresh LastAccessed. Safe on a nil
+// Store.
+func (s *Store) SoleLiveByTitle(title string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	var sole *Run
+	for _, r := range s.runs {
+		if now.Sub(r.LastAccessed) > s.ttl {
+			continue
+		}
+		if sole != nil {
+			return "", false
+		}
+		sole = r
+	}
+	if sole == nil || sole.taskByTitle(titleKey(title)) == 0 {
+		return "", false
+	}
+	return sole.ID, true
+}
+
 // Attach records a validate_task_spec session against the task ref names
 // (see resolve), adding the task's row on its first attach. A later attach is
 // a re-validation: the row takes the new pre-verdict and one more attempt, and
