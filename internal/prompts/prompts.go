@@ -255,6 +255,11 @@ type PlanInput struct {
 	// ControllerVerifiedReferences name references the controller already
 	// checked against the codebase.
 	ControllerVerifiedReferences []string
+	// PriorPlanFindings are the plan-level findings an earlier round of the
+	// same plan run raised. Only the findings-only prompt shows them, in its
+	// per-call section, so the prefix it shares with the chunk prompts stays
+	// byte-identical.
+	PriorPlanFindings []verdict.Finding
 }
 
 type KBIndexEntry struct {
