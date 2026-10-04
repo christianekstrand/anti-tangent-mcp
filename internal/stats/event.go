@@ -69,6 +69,7 @@ var countedCriteria = map[string]bool{
 	"spec":                         true,
 	"structure":                    true,
 	"max_tokens_override":          true,
+	"plan_run_id":                  true,
 }
 
 // CountFindings builds severity, category, and criterion histograms (and the total) from a
