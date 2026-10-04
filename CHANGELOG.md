@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `record_review_outcome` with `source: final_review` returns `missing_implementer_models`: the tasks that have a final verdict and that the call named no implementer model for. The outcome is still recorded; the summary block names the tasks so the controller can call again with the full list.
 - `events.jsonl` counts the `plan_run_id` criterion, so the stats show how often a `validate_task_spec` or lightweight `validate_completion` call named no plan run and therefore left its task out of the run records.
 - `runs.jsonl` task snapshots and `plan-runs.jsonl` rows carry `over_building_ruled`: how many of the task's `validate_completion` calls had an `over_building` finding settled by an answer or a controller ruling instead of by a fix.
+- `anti-tangent-guard` 0.7.0 gains a fourth hook, `check-progress-nudge`: a `PostToolUse` hook on `Edit`/`Write`/`NotebookEdit` that asks a task for a `check_progress` call, once, when it has made ten edits since `validate_task_spec` without one. It reads the session's own transcript (a subagent's, or the main session's), refuses nothing, and is silent with no `validate_task_spec` call and after `validate_completion`. `ANTI_TANGENT_PROGRESS_EDITS` sets the threshold and `ANTI_TANGENT_PROGRESS_GUARD=0` turns the hook off; every failure allows. Trace lines read `progress | pass|nudge|skip | edits=N`, with the subagent in the session column.
 
 ### Changed
 

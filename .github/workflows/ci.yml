@@ -182,6 +182,9 @@ jobs:
       - name: Session guard
         run: python3 -B plugin/anti-tangent-guard/hooks/check_task_start_test.py
 
+      - name: Progress reminder
+        run: python3 -B plugin/anti-tangent-guard/hooks/check_progress_nudge_test.py
+
       - name: Calibration corpus builder
         run: python3 -B plugin/anti-tangent-guard/evals/build-jev-comments-test.py
 
