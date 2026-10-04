@@ -45,6 +45,10 @@ func TestClaimIsOnlyListedPaths(t *testing.T) {
 		{"two backticked listed paths, comma-separated", "`pkg/store.go`, `pkg/store_test.go`", true},
 		{"two backticked listed paths with line anchors", "`pkg/store.go:10-20` and ` pkg/store_test.go:5 `", true},
 		{"a backticked listed path and a backticked symbol", "`pkg/store.go` and `Store.Get`", false},
+		{"what a listed file already does", "pkg/store.go already retries on timeout", false},
+		{"a convention a listed file follows", "pkg/store.go wraps errors with the repository's usual helper", false},
+		{"what a listed file holds", "pkg/store.go has three exported methods", false},
+		{"a label, a verb and filler only", "Create: pkg/store.go; the task also modifies pkg/store_test.go, which cannot be verified from the plan text.", true},
 		{"empty claim", "", false},
 	}
 	for _, tc := range cases {
