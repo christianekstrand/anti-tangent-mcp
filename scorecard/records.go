@@ -120,10 +120,10 @@ func NormalizeCategory(s string) string {
 	return string([]rune(s)[:40])
 }
 
-var modelDateSuffix = regexp.MustCompile(`-\d{8}$`)
+var modelDateSuffix = regexp.MustCompile(`-\d{4}-?\d{2}-?\d{2}$`)
 
 // NormalizeModel is the form a model id takes in every cohort key:
-// lower-cased, trimmed, and without one trailing -YYYYMMDD date stamp, so a
+// lower-cased, trimmed, and without one trailing date stamp, -YYYYMMDD or -YYYY-MM-DD, so a
 // dated id and its undated alias land in the same cohort. It is applied when
 // records are read, never when they are written, so records stored before it
 // existed group the same way as new ones.

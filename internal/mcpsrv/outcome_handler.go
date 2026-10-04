@@ -30,7 +30,7 @@ type RecordReviewOutcomeArgs struct {
 	PlanRunID         string                       `json:"plan_run_id" jsonschema:"The plan_run_id returned by validate_plan for the run the review covered."`
 	Source            string                       `json:"source" jsonschema:"final_review for the controller's whole-plan review, review_now for a human-adjudicated PR review."`
 	ReviewerModel     string                       `json:"reviewer_model,omitempty" jsonschema:"provider:model that performed the review, when known. At most 100 characters, no control character."`
-	ImplementerModels []OutcomeImplementerModelArg `json:"implementer_models,omitempty" jsonschema:"The model each task was dispatched on, one entry per dispatched task. The controller knows this; the server cannot see it. Tasks left out are listed in missing_implementer_models and scored in an unknown cohort."`
+	ImplementerModels []OutcomeImplementerModelArg `json:"implementer_models,omitempty" jsonschema:"The model each task was dispatched on, one entry per dispatched task. The controller knows this; the server cannot see it. For final_review, tasks left out are listed in missing_implementer_models and scored in an unknown cohort."`
 	Findings          []OutcomeFindingArg          `json:"findings" jsonschema:"Every finding the review kept, attributed to a task. An empty array means the review found nothing, which is itself recorded."`
 }
 
@@ -40,8 +40,9 @@ type RecordReviewOutcomeResult struct {
 	RunKnown    bool               `json:"run_known"`
 	TasksScored int                `json:"tasks_scored"`
 	Escapes     []scorecard.Escape `json:"escapes"`
-	// MissingImplementerModels lists the tasks that have a final verdict and
-	// that this call named no implementer model for.
+	// MissingImplementerModels lists, for a final_review call, the tasks that
+	// have a final verdict and that the call named no implementer model for.
+	// It is always empty for review_now.
 	MissingImplementerModels []int  `json:"missing_implementer_models"`
 	SummaryBlock             string `json:"summary_block"`
 }
@@ -98,7 +99,9 @@ func (h *handlers) recordReviewOutcome(args RecordReviewOutcomeArgs) RecordRevie
 	res.Recorded = true
 	var snapshotted bool
 	res.Escapes, res.TasksScored, snapshotted = scorecard.RunEscapes(lines, o)
-	res.MissingImplementerModels = missingImplementerModels(scorecard.TasksWithVerdict(lines), args.ImplementerModels)
+	if args.Source == scorecard.SourceFinalReview {
+		res.MissingImplementerModels = missingImplementerModels(scorecard.TasksWithVerdict(lines), args.ImplementerModels)
+	}
 	// A run minted before stats were enabled is live but has no snapshot
 	// lines; it is still a run this server knows.
 	_, live := h.deps.PlanRuns.PlanTaskCount(runID)

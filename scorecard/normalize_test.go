@@ -12,6 +12,7 @@ func TestNormalizeModel(t *testing.T) {
 		"anthropic:claude-haiku-4-5":          "anthropic:claude-haiku-4-5",
 		"anthropic:claude-sonnet-5-5":         "anthropic:claude-sonnet-5-5",
 		"openai:gpt-5.6-terra":                "openai:gpt-5.6-terra",
+		"openai:gpt-5-2025-08-07":             "openai:gpt-5",
 		"":                                    "",
 	}
 	for in, want := range cases {
@@ -94,4 +95,34 @@ func TestBaselinePrefersSameModels(t *testing.T) {
 		return
 	}
 	t.Fatal("no 0.27.0 cohort")
+}
+
+func TestCheckpointSpellingsOfOneModelScoreTheTaskOnce(t *testing.T) {
+	a := ToolCall{Tool: "check_progress", Model: "openai:gpt-x", Verdict: "pass", MS: 1}
+	b := ToolCall{Tool: "check_progress", Model: "openai:gpt-x-20260101", Verdict: "warn", MS: 1}
+	c := ToolCall{Tool: "check_progress", Model: "openai:gpt-x-20260102", Verdict: "warn", MS: 1}
+	lines := []RunLine{taskLine("r1", t0, 1, "pass", a, b, c)}
+	outs := []OutcomeLine{outcome("r1", SourceFinalReview, t0.Add(time.Hour))}
+	sc := Compute(lines, outs, Options{})
+	var rows []ToolModelRow
+	for _, r := range sc.ByToolModel {
+		if r.Tool == "check_progress" {
+			rows = append(rows, r)
+		}
+	}
+	if len(rows) != 1 || rows[0].Model != "openai:gpt-x" || rows[0].Calls != 3 {
+		t.Fatalf("check_progress rows = %+v", rows)
+	}
+	var found bool
+	for _, o := range rows[0].Outcomes {
+		if o.Source == SourceFinalReview {
+			found = true
+			if o.UnconfirmedFlagRate.N != 1 {
+				t.Fatalf("unconfirmed = %+v", o.UnconfirmedFlagRate)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no final_review outcome: %+v", rows[0].Outcomes)
+	}
 }

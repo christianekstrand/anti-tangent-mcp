@@ -89,17 +89,23 @@ func (h *handlers) appendPlanLedger(runID string, row planrun.TaskRow) {
 	}
 }
 
-// diffLineCounts returns how many lines a unified diff adds and removes. A
-// "--- " line counts as a file header only when a "+++ " line follows it
-// directly, so a removed line whose own text begins with "-- " is still
-// counted as a removal.
+// diffLineCounts returns how many lines a unified diff adds and removes.
+// Only lines after the first "@@" line are counted, so a preamble such as a
+// commit message is ignored. Within the hunks, a "--- " line counts as a file
+// header only when a "+++ " line follows it directly, so a removed line whose
+// own text begins with "-- " is still counted as a removal.
 func diffLineCounts(diff string) (added, removed int) {
 	if diff == "" {
 		return 0, 0
 	}
 	lines := strings.Split(diff, "\n")
+	inHunk := false
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
+		if !inHunk {
+			inHunk = strings.HasPrefix(line, "@@")
+			continue
+		}
 		if strings.HasPrefix(line, "--- ") && i+1 < len(lines) && strings.HasPrefix(lines[i+1], "+++ ") {
 			i++
 			continue
@@ -138,7 +144,9 @@ func completionRowUpdate(env Envelope, cs *codescene.Digest, finalDiff string) f
 			}
 			row.Categories[c] += n
 		}
-		row.LinesAdded, row.LinesRemoved = added, removed
+		if finalDiff != "" {
+			row.LinesAdded, row.LinesRemoved = added, removed
+		}
 		row.SubmissionOnly = env.SubmissionDefectOnly
 		row.Codescene = cs
 		row.CodesceneState = state

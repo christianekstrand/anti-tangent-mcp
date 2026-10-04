@@ -281,9 +281,9 @@ ANTI_TANGENT_SCORECARD_MIN_RUNS=10
 
 With `ANTI_TANGENT_STATS_DIR` set, the server also writes three content-free files:
 
-- `runs.jsonl`: one line per plan-run task change, carrying the task's verdicts, severity counts and its call log: the latest 32 anti-tangent calls made for the task, each with the model that answered it, plus `calls_dropped` counting any older calls the cap evicted, `categories` (findings per category, summed over the task's `validate_completion` calls) and `lines_added` / `lines_removed` (the size of the latest call's diff); and a header per run with the configured model per role.
+- `runs.jsonl`: one line per plan-run task change, carrying the task's verdicts, severity counts and its call log: the latest 32 anti-tangent calls made for the task, each with the model that answered it, plus `calls_dropped` counting any older calls the cap evicted, `categories` (findings per category, summed over the task's `validate_completion` calls) and `lines_added` / `lines_removed` (the size of the most recent diff a call sent); and a header per run with the configured model per role.
 - `outcomes.jsonl`: one line per `record_review_outcome` call.
-- `scorecard.json`: escape rate (tasks anti-tangent passed that the independent review found a critical or major problem in), unconfirmed-flag rate, waive rate and cost, by review-model cohort and by anti-tangent tool × model, each rate with its n and 90% interval. `correctness_escape_rate` narrows the escape rate to `correctness` problems; `correctness_flag_recall` is, of the tasks with such a problem, the share where anti-tangent raised a `correctness` finding on any completion call (matched by task, so an upper bound); `lines_added_p50` is the median diff size. Model ids are compared lower-cased and without a trailing `-YYYYMMDD` stamp. `regression` compares a cohort with the most recent earlier cohort of the same review and implementer models (any earlier cohort when there is none), and stays `insufficient_data` until both have `ANTI_TANGENT_SCORECARD_MIN_RUNS` runs (default 10).
+- `scorecard.json`: escape rate (tasks anti-tangent passed that the independent review found a critical or major problem in), unconfirmed-flag rate, waive rate and cost, by review-model cohort and by anti-tangent tool × model, each rate with its n and 90% interval. `correctness_escape_rate` narrows the escape rate to `correctness` problems; `correctness_flag_recall` is, of the tasks with such a problem, the share where anti-tangent raised a `correctness` finding on any completion call (matched by task, so an upper bound); `lines_added_p50` is the median diff size. Model ids are compared lower-cased and without a trailing date stamp (`-YYYYMMDD` or `-YYYY-MM-DD`). Read `correctness_flag_recall` from `cohorts`, which are keyed by server version: `by_review_model` also counts tasks from versions that could not raise a `correctness` finding. `regression` compares a cohort with the most recent earlier cohort of the same review and implementer models (any earlier cohort when there is none), and stays `insufficient_data` until both have `ANTI_TANGENT_SCORECARD_MIN_RUNS` runs (default 10).
 
 The gnome-topbar daemon renders these at `/ui/runs`.
 
@@ -336,11 +336,11 @@ In addition to the existing `task_title` / `goal` / `acceptance_criteria` / `non
 
 ### `validate_completion` arguments
 
-The completion review walks every acceptance criterion and then reads the submitted change for defects of its own: a finding the evidence shows is reported as `correctness`, and a test that would not fail if the behaviour broke as `test_adequacy`. Either can be critical or major and so move the verdict. The reviewer sees only what the call submits, so a diff with little context limits what it can find.
-
 In addition to `final_files` / `final_diff` / `final_diff_path` and other documented fields:
 
 - `context_paths` (optional, v0.25.0+): absolute paths to files the change does not touch, such as the package's existing helpers. The server reads them and shows the reviewer their contents, so the reviewer can report a helper the diff re-implements as an over-building `reuse:` instance — which needs a diff (`final_diff` or `final_diff_path`); with `final_files` alone the completion review makes no over-building finding. The reviewer is told they are never evidence for an acceptance criterion; the server cannot enforce what a model counts. Under `ANTI_TANGENT_PLAN_ROOTS` when it is set, at most 50 files, within `ANTI_TANGENT_CONTEXT_MAX_FILE_BYTES` and `ANTI_TANGENT_CONTEXT_MAX_PAYLOAD_BYTES`; they do not count toward the payload cap.
+
+The completion review walks every acceptance criterion and then reads the submitted change for defects of its own: a finding the evidence shows is reported as `correctness`, and a test that would not fail if the behaviour broke as `test_adequacy`. Either can be critical or major and so move the verdict. The reviewer sees only what the call submits, so a diff with little context limits what it can find.
 
 ### Lightweight protocol mode (v0.3.1+)
 

@@ -37,8 +37,8 @@ style preferences rather than sending them as `minor`.
 must not be sent.
 
 **Implementer models.** Pass the model you dispatched each task on, one entry per task: with
-model routing it differs per task, and the server cannot see it. The response lists the tasks you
-left out in `missing_implementer_models`; call again with the full list, because a task without a
+model routing it differs per task, and the server cannot see it. A `final_review` response lists the
+tasks you left out in `missing_implementer_models`; call again with the full list, because a task without a
 model is scored in an `unknown` cohort. A dated id and its undated form count as one model.
 
 **PR body line.** When you open the pull request, add one line per plan run to its body:

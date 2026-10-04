@@ -86,3 +86,25 @@ func TestTaskSnapshot_OmitsEmptyCategoriesAndDiffSize(t *testing.T) {
 		assert.NotContains(t, string(raw), key)
 	}
 }
+
+func TestDiffLineCounts_IgnoresLinesBeforeFirstHunk(t *testing.T) {
+	diff := "commit abc\n" +
+		"- a bullet in the commit message\n" +
+		"-- \n" +
+		"--- a/x\n" +
+		"+++ b/x\n" +
+		"@@ -1 +1 @@\n" +
+		"-old\n" +
+		"+new\n"
+	added, removed := diffLineCounts(diff)
+	assert.Equal(t, 1, added)
+	assert.Equal(t, 1, removed)
+}
+
+func TestCompletionRowUpdate_NoDiffRetryKeepsEarlierDiffSize(t *testing.T) {
+	var row planrun.TaskRow
+	completionRowUpdate(Envelope{Verdict: "pass"}, nil, "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n")(&row)
+	completionRowUpdate(Envelope{Verdict: "pass"}, nil, "")(&row)
+	assert.Equal(t, 1, row.LinesAdded)
+	assert.Equal(t, 1, row.LinesRemoved)
+}

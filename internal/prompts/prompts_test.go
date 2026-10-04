@@ -2509,5 +2509,7 @@ func TestRenderPost_AsksForCorrectnessBeforeCommentHygiene(t *testing.T) {
 	assert.Contains(t, out.User, "`category: correctness`")
 	assert.Contains(t, out.User, "`category: test_adequacy`")
 	assert.Contains(t, out.User, "Do not speculate about code that was not submitted")
+	assert.Contains(t, out.User, "that the submitted code contradicts")
+	assert.Contains(t, out.User, "report a defect only in code the summary or an acceptance criterion ties to this task")
 	assert.Contains(t, out.User, "OR for a `correctness` or `test_adequacy` finding that meets the severity bar in its own section below")
 }

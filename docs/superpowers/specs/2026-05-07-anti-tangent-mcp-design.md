@@ -91,7 +91,7 @@ All three tools return a common envelope:
   "findings": [
     {
       "severity": "critical" | "major" | "minor",
-      "category": "missing_acceptance_criterion" | "scope_drift" | "ambiguous_spec" | "unaddressed_finding" | "quality" | "session_not_found" | "payload_too_large" | "other",
+      "category": "missing_acceptance_criterion" | "scope_drift" | "ambiguous_spec" | "unaddressed_finding" | "quality" | "session_not_found" | "payload_too_large" | "correctness" | "test_adequacy" | "other",
       "criterion": "string — which AC or non-goal this maps to (or 'spec' for pre-hook)",
       "evidence": "string — the specific code or spec text that triggered this finding",
       "suggestion": "string — the concrete next action"

@@ -69,9 +69,8 @@ type TaskRow struct {
 	// Categories counts, per finding category, the findings every
 	// validate_completion call on the task returned, summed over the calls.
 	Categories map[string]int `json:"categories,omitempty"`
-	// LinesAdded and LinesRemoved are the size of the latest
-	// validate_completion call's final_diff. Both are zero when that call
-	// sent no diff.
+	// LinesAdded and LinesRemoved are the size of the most recent final_diff
+	// any validate_completion call on the task sent; zero when none sent one.
 	LinesAdded   int `json:"lines_added,omitempty"`
 	LinesRemoved int `json:"lines_removed,omitempty"`
 }

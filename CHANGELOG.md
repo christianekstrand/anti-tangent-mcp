@@ -10,15 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `correctness` and `test_adequacy` finding categories for the per-task review tools. Neither is severity-floored, and a major one is an open code finding: `next_action` tells the implementer to fix and re-validate.
-- `runs.jsonl` task snapshots carry `categories` (findings per category, summed over the task's `validate_completion` calls) and `lines_added` / `lines_removed` (the size of the latest call's `final_diff`; absent when the call sent no diff). `plan-runs.jsonl` rows carry the same three fields.
+- `runs.jsonl` task snapshots carry `categories` (findings per category, summed over the task's `validate_completion` calls) and `lines_added` / `lines_removed` (the size of the most recent `final_diff` a call sent; absent when none did). `plan-runs.jsonl` rows carry the same three fields.
 - `scorecard.json` groups report `correctness_escape_rate` (passed tasks in which the review found a critical or major `correctness` problem), `correctness_flag_recall` (of the tasks with such a problem, the share where anti-tangent raised a `correctness` finding on any completion call; matched by task, so an upper bound) and `lines_added_p50`.
-- `record_review_outcome` returns `missing_implementer_models`: the tasks that have a final verdict and that the call named no implementer model for. The outcome is still recorded; the summary block names the tasks so the controller can call again with the full list.
+- `record_review_outcome` with `source: final_review` returns `missing_implementer_models`: the tasks that have a final verdict and that the call named no implementer model for. The outcome is still recorded; the summary block names the tasks so the controller can call again with the full list.
 - `events.jsonl` counts the `plan_run_id` criterion, so the stats show how often a `validate_task_spec` or lightweight `validate_completion` call named no plan run and therefore left its task out of the run records.
 
 ### Changed
 
 - `validate_completion` now asks the reviewer to look for defects in the submitted change (wrong results on boundary inputs, dropped failures, unprotected shared state, unreleased resources, one-sided caller/callee changes) and for tests that would not fail if the behaviour broke, reported as `correctness` and `test_adequacy`. A finding of either kind can be critical or major, so it moves the verdict; the reviewer is told to report only what the submitted evidence shows.
-- Scorecard cohorts key on a normalised model id: lower-cased, trimmed, and without a trailing `-YYYYMMDD` date stamp, so `claude-haiku-4-5` and `claude-haiku-4-5-20251001` are one cohort. Stored records are unchanged; the normalisation is applied when they are read.
+- Scorecard cohorts key on a normalised model id: lower-cased, trimmed, and without a trailing date stamp (`-YYYYMMDD` or `-YYYY-MM-DD`), so `claude-haiku-4-5` and `claude-haiku-4-5-20251001` are one cohort. Stored records are unchanged; the normalisation is applied when they are read.
 - A cohort's regression baseline is now the most recent earlier cohort with the same review model and implementer model, falling back to the most recent earlier cohort of any key when there is none.
 
 ## [0.26.0] - 2026-09-24

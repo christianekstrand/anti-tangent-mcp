@@ -263,3 +263,16 @@ func TestRecordReviewOutcome_MissingModelsIsAnArrayWhenNotRecorded(t *testing.T)
 	require.False(t, res.Recorded)
 	assert.NotNil(t, res.MissingImplementerModels)
 }
+
+func TestRecordReviewOutcome_ReviewNowDoesNotListMissingModels(t *testing.T) {
+	h, _, dir := outcomeHandlers(t)
+	runID := outcomeRun(t, h, 2)
+	res := recordOutcome(t, h, RecordReviewOutcomeArgs{
+		PlanRunID: runID, Source: "review_now",
+		Findings: []OutcomeFindingArg{},
+	})
+	require.True(t, res.Recorded, res.Reason)
+	assert.Equal(t, []int{}, res.MissingImplementerModels)
+	assert.NotContains(t, res.SummaryBlock, "implementer model missing")
+	waitForScorecard(t, dir)
+}
