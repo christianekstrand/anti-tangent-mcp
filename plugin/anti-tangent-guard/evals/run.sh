@@ -289,7 +289,7 @@ EVALS_FILE="$SCRIPT_DIR/guard-evals.json"
 # file must declare EXPECTED_CASE_COUNT cases, AND the loop must actually
 # execute that many (a silently-skipped case would satisfy the first check
 # alone).
-EXPECTED_CASE_COUNT=179
+EXPECTED_CASE_COUNT=194
 
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/anti-tangent-guard-evals.XXXXXX")
 # Both hooks default their trace log to a fixed shared path under /tmp, and
@@ -352,6 +352,8 @@ JEV_PORT=$(cat "$JEV_PORT_FILE" 2>/dev/null)
 unset ANTI_TANGENT_TICKET_PATTERN
 unset ANTI_TANGENT_COMPLETION_GUARD
 unset ANTI_TANGENT_COMMENT_GUARD
+unset ANTI_TANGENT_PROGRESS_GUARD
+unset ANTI_TANGENT_PROGRESS_EDITS
 unset ANTI_TANGENT_JEV
 unset ANTI_TANGENT_JEV_URL
 unset ANTI_TANGENT_JEV_MODEL
@@ -890,7 +892,7 @@ if [[ "$json_count" -ne "$EXPECTED_CASE_COUNT" ]]; then
     exit 1
 fi
 
-echo "anti-tangent-guard hook evals (check-task-complete + check-comment-write, pattern and semantic tiers + check-task-start)"
+echo "anti-tangent-guard hook evals (check-task-complete + check-comment-write, pattern and semantic tiers + check-task-start + check-progress-nudge)"
 echo "────────────────────────────────────────────────────────────────"
 
 for ((i = 0; i < json_count; i++)); do
@@ -931,6 +933,13 @@ if ! grep -q "comment-write | jev-block | p=0.95" "$ANTI_TANGENT_GUARD_TRACE_LOG
 fi
 if ! grep -q "comment-write | jev-yield" "$ANTI_TANGENT_GUARD_TRACE_LOG"; then
     echo "FAIL: no jev-yield trace line"
+    FAILED=$((FAILED + 1))
+fi
+
+# An exit code of 2 says the hook asked; the trace line is what says it asked
+# at the default threshold, recorded the count, and named the subagent.
+if ! grep -qF "s=parent.a1 | progress | nudge | edits=10" "$ANTI_TANGENT_GUARD_TRACE_LOG"; then
+    echo "FAIL: no progress nudge trace line with its edit count"
     FAILED=$((FAILED + 1))
 fi
 

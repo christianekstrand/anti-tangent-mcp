@@ -1,6 +1,6 @@
 {
   "skill_name": "anti-tangent-guard",
-  "description": "Evals for the check-task-complete PostToolUse hook, the check-comment-write PreToolUse hook, and the check-task-start PreToolUse hook (179 cases)",
+  "description": "Evals for the check-task-complete PostToolUse hook, the check-comment-write PreToolUse hook, the check-task-start PreToolUse hook, and the check-progress-nudge PostToolUse hook (194 cases)",
   "evals": [
     {
       "id": 1,
@@ -2924,6 +2924,222 @@
       "case_timeout_seconds": 10,
       "expected_exit": 0,
       "reason": "the stub never answers this one: the deadline must expire and the write must proceed, because a service that cannot answer must not stop an edit; the case timeout sits above the tier's four-second deadline so a deadline that stops firing fails this case instead of stalling the suite"
+    },
+    {
+      "id": 180,
+      "name": "progress-nudge-tenth-edit-asks-once",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-2\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-3\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-4\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-5\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-6\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-7\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-8\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-9\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exits": [
+        2,
+        0
+      ],
+      "expected_stderr_contains": [
+        "CHECKPOINT DUE: call check_progress"
+      ],
+      "reason": "ten edits after validate_task_spec with no check_progress must ask, at the default threshold, and the same task must not be asked a second time"
+    },
+    {
+      "id": 181,
+      "name": "progress-nudge-below-threshold-passes",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-2\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-3\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-4\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-5\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-6\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-7\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-8\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 0,
+      "reason": "nine edits is under the default threshold of ten, so nothing is asked"
+    },
+    {
+      "id": 182,
+      "name": "progress-nudge-check-progress-called-passes",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c2\", \"name\": \"mcp__anti-tangent__check_progress\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c3-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c3-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c3-2\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 0,
+      "reason": "a task that already called check_progress is never asked, however many edits follow"
+    },
+    {
+      "id": 183,
+      "name": "progress-nudge-completion-loop-skips",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-2\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c2\", \"name\": \"mcp__anti-tangent__validate_completion\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c3-0\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 0,
+      "reason": "after validate_completion the task is fixing review findings, and those edits are not asked about"
+    },
+    {
+      "id": 184,
+      "name": "progress-nudge-no-task-skips",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0-2\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0-3\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0-4\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 0,
+      "reason": "no validate_task_spec call means no task: a lightweight task or ordinary editing is never asked"
+    },
+    {
+      "id": 185,
+      "name": "progress-nudge-main-session-asks",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "tmpdir_fixture": {
+        "parent.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-2\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 2,
+      "expected_stderr_contains": [
+        "CHECKPOINT DUE: call check_progress"
+      ],
+      "reason": "with no agent_id the payload is the main session, whose own transcript is read: a task run without a dispatched subagent is asked too"
+    },
+    {
+      "id": 186,
+      "name": "progress-nudge-reads-subagent-not-parent",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "tmpdir_fixture": {
+        "parent.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-2\", \"name\": \"Edit\", \"input\": {}}]}}\n",
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 0,
+      "reason": "inside a subagent the count comes from the subagent's transcript; a hook that read the parent's would ask after one edit"
+    },
+    {
+      "id": 187,
+      "name": "progress-nudge-next-task-is-asked-on-its-own-count",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-2\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c2\", \"name\": \"mcp__anti-tangent__validate_completion\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c3\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c4-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c4-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c4-2\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 2,
+      "expected_stderr_contains": [
+        "CHECKPOINT DUE: call check_progress"
+      ],
+      "reason": "the window is the last validate_task_spec call: a hook that read the first one would see the earlier task's validate_completion and stay silent for every task after it"
+    },
+    {
+      "id": 188,
+      "name": "progress-nudge-next-task-starts-from-zero",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c2\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c3-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c3-1\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 0,
+      "reason": "a new validate_task_spec call restarts the count: four edits across two tasks is two for the current one"
+    },
+    {
+      "id": 189,
+      "name": "progress-nudge-kill-switch",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3",
+        "ANTI_TANGENT_PROGRESS_GUARD": "0"
+      },
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-2\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 0,
+      "reason": "ANTI_TANGENT_PROGRESS_GUARD=0 turns the hook off for a task that is due"
+    },
+    {
+      "id": 190,
+      "name": "progress-nudge-unusable-threshold-uses-default",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "abc"
+      },
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-2\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-3\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-4\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-5\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-6\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-7\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-8\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-9\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 2,
+      "expected_stderr_contains": [
+        "CHECKPOINT DUE: call check_progress"
+      ],
+      "reason": "a threshold that is not a whole number above zero falls back to ten, so the tenth edit asks; a body that failed on the value would allow instead"
+    },
+    {
+      "id": 191,
+      "name": "progress-nudge-no-python3-fails-open",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-2\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "path_stub_exclude": "python3",
+      "expected_exit": 0,
+      "reason": "with python3 missing from PATH the wrapper must allow a task that is due"
+    },
+    {
+      "id": 192,
+      "name": "progress-nudge-missing-transcript-fails-open",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Edit\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "expected_exit": 0,
+      "reason": "a subagent transcript that does not exist must allow, not fail the edit's hook"
+    },
+    {
+      "id": 193,
+      "name": "progress-nudge-malformed-stdin-fails-open",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "not json",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "expected_exit": 0,
+      "reason": "a payload that is not JSON must allow"
+    },
+    {
+      "id": 194,
+      "name": "progress-nudge-read-is-not-gated",
+      "hook": "check-progress-nudge",
+      "stdin_raw": "{\"tool_name\": \"Read\", \"tool_input\": {\"file_path\": \"{{TMPDIR}}/x.go\"}, \"transcript_path\": \"{{TMPDIR}}/parent.jsonl\", \"session_id\": \"parent\", \"agent_id\": \"a1\", \"agent_type\": \"general-purpose\"}",
+      "env": {
+        "ANTI_TANGENT_PROGRESS_EDITS": "3"
+      },
+      "tmpdir_fixture": {
+        "parent/subagents/agent-a1.jsonl": "{\"type\": \"user\", \"message\": {\"role\": \"user\", \"content\": \"Implement Task 3.\"}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c0\", \"name\": \"mcp__anti-tangent__validate_task_spec\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-0\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-1\", \"name\": \"Edit\", \"input\": {}}]}}\n{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"c1-2\", \"name\": \"Edit\", \"input\": {}}]}}\n"
+      },
+      "expected_exit": 0,
+      "reason": "only Edit, Write and NotebookEdit are acted on, whatever the matcher sends"
     }
   ]
 }
