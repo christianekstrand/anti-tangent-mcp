@@ -40,6 +40,11 @@ func TestClaimIsOnlyListedPaths(t *testing.T) {
 		{"listed path plus a capitalised symbol", "pkg/store.go already defines Store with a mutex", false},
 		{"listed path plus two capitalised symbols", "pkg/store.go registers the Reviewer interface with Registry", false},
 		{"a capital that opens a second sentence", "pkg/store.go is listed. It cannot be checked.", true},
+		{"two backticked listed paths", "`pkg/store.go` and `pkg/store_test.go`", true},
+		{"two backticked listed paths in prose", "Modify `pkg/store.go` and `pkg/store_test.go` per the plan", true},
+		{"two backticked listed paths, comma-separated", "`pkg/store.go`, `pkg/store_test.go`", true},
+		{"two backticked listed paths with line anchors", "`pkg/store.go:10-20` and ` pkg/store_test.go:5 `", true},
+		{"a backticked listed path and a backticked symbol", "`pkg/store.go` and `Store.Get`", false},
 		{"empty claim", "", false},
 	}
 	for _, tc := range cases {

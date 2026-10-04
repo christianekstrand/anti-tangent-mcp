@@ -11,8 +11,8 @@ import (
 // taskSpecListedFiles returns the paths the task's own Files: section lists:
 // the ones a Files: section in the caller's Context names, and the ones plan
 // run planRunID recorded for the task from the plan.
-func (h *handlers) taskSpecListedFiles(context, planRunID string, ref planrun.TaskRef) []string {
-	files := planparser.ListedPaths(context)
+func (h *handlers) taskSpecListedFiles(contextText, planRunID string, ref planrun.TaskRef) []string {
+	files := planparser.ListedPaths(contextText)
 	if planRunID == "" {
 		return files
 	}

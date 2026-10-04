@@ -233,5 +233,7 @@ func TestListedPaths_EveryLabelledBulletOfTheFilesSection(t *testing.T) {
 	assert.Equal(t,
 		[]string{"pkg/new.go", "pkg/old.go", "pkg/other.go", "pkg/new_test.go", "pkg/old_test.go"},
 		ListedPaths(body))
+	assert.Nil(t, ListedPaths("**Files:**\n- `pkg/unlabelled.go`\n- no label here\n"),
+		"a bullet with no `label:` contributes nothing, even when it names a path")
 	assert.Nil(t, ListedPaths("### Task 2: y\n\n**Goal:** g\n"), "no Files section lists nothing")
 }

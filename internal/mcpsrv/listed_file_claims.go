@@ -12,10 +12,17 @@ import (
 // a control character, which no claim text and no path contains.
 const listedPathMark = "\x00"
 
+// markedAnchor is the pattern for a listed path's stand-in together with a
+// line anchor that followed the path: ":57", ":57-70", ":57,70".
+const markedAnchor = listedPathMark + `(?::\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)?`
+
 var (
-	// markedAnchorRe matches a listed path's stand-in together with a line
-	// anchor that followed the path: ":57", ":57-70", ":57,70".
-	markedAnchorRe = regexp.MustCompile(listedPathMark + `(?::\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)?`)
+	markedAnchorRe = regexp.MustCompile(markedAnchor)
+	// emptiedSpanRe matches a backticked span that held one listed path and
+	// nothing else. Such spans are removed whole: with only their contents
+	// blanked, the closing backtick of one and the opening backtick of the
+	// next would read as a span around the prose between them.
+	emptiedSpanRe = regexp.MustCompile("`\\s*" + markedAnchor + "\\s*`")
 	// codeSpanRe matches a backticked span that still holds something once
 	// the listed paths are gone.
 	codeSpanRe = regexp.MustCompile("`[^`]*[^`\\s][^`]*`")
@@ -101,6 +108,7 @@ func claimIsOnlyListedPaths(claim string, files []string) bool {
 	if !named {
 		return false
 	}
+	rest = emptiedSpanRe.ReplaceAllString(rest, " ")
 	rest = markedAnchorRe.ReplaceAllString(rest, " ")
 	return !codeSpanRe.MatchString(rest) && !codeTokenRe.MatchString(rest) && !midSentenceCapitalRe.MatchString(rest)
 }

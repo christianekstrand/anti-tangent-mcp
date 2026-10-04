@@ -358,7 +358,8 @@ func canonRefPath(p string) string {
 var listedBulletRe = regexp.MustCompile("^\\s*[-*]\\s+[^:`]+:\\s*(.+)$")
 
 // ListedPaths returns every path a task body's **Files:** section lists,
-// whatever the bullet's label, each once and in order of first appearance.
+// whatever the bullet's label, each once and in order of first appearance. A
+// bullet with no `label:` before its paths contributes nothing.
 // The section's bounds are FileRefs': it starts at the heading and stops at
 // the first line that is neither a bullet nor blank.
 func ListedPaths(body string) []string {
