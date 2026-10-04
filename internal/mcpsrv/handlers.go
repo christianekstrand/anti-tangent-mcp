@@ -2025,7 +2025,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 	escalateIDs := markRepeats(reviewer, review.prior, review.shown)
 	// The companion sits after the reviewer's block, so it is never stored as
 	// a prior finding and never shown to the next review as one.
-	overBuilding := reviewOverBuilding(reviewer, preTaskLinks, review, overBuildingAnswered)
+	overBuilding := reviewOverBuilding(reviewer, review, overBuildingAnswered)
 	tail := out.Server
 	if companion, ok := overBuilding.companion(); ok {
 		tail = append([]verdict.Finding{companion}, tail...)
