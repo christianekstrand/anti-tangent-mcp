@@ -75,7 +75,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/verdict/finalize_test.go` (the file imports `require` only):
 
@@ -191,12 +191,12 @@ func TestValidateCompletion_NewMinorsSharingACriterionStillCount(t *testing.T) {
 
 `findingObj`, `newRulingsHandlers`, `startTask`, `completeWith` are in `handlers_rulings_test.go`; `completionCallArgs`, `reviewerFindingsResp` in `handlers_truncation_test.go`; `strPtr` is an existing test helper.
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `go test ./internal/verdict/... -run RepeatedMinors; go test ./internal/mcpsrv/... -run 'CarriedMinor|CarriesAMinor|NewMinorsSharing'`
 Expected: FAIL. The verdict test reports `warn` where it wants `pass`; the mcpsrv tests report an empty `RepeatOf` and a `warn` second call.
 
-- [ ] **Step 3: Leave carried minors out of the ladder**
+- [x] **Step 3: Leave carried minors out of the ladder**
 
 In `internal/verdict/finalize.go`, replace
 
@@ -245,7 +245,7 @@ with
 jsonschema:"Server-set: the id of an earlier finding this finding raises again: one the implementer answered, or a minor finding carried over from the previous validate_completion call. A minor finding that carries it does not count toward the verdict."
 ```
 
-- [ ] **Step 4: Mark carried minors**
+- [x] **Step 4: Mark carried minors**
 
 In `internal/mcpsrv/finding_rulings.go`, replace
 
@@ -352,12 +352,12 @@ func markRepeats(fs []verdict.Finding, prior []prompts.PriorFinding, shown map[s
 
 The two answered-repeat branches, the clearing of `same_as`, the escalation check and the return are unchanged: the edit adds the `carriedMinors` type, collects prior minors in the first loop, and adds the third branch.
 
-- [ ] **Step 5: Run the packages**
+- [x] **Step 5: Run the packages**
 
 Run: `go test -race ./internal/verdict/... ./internal/mcpsrv/...`
 Expected: `ok` twice. If `TestToolSchema...` contract tests fail on the `repeat_of` description, the description edit in `verdict.go` was not applied exactly.
 
-- [ ] **Step 6: Changelog**
+- [x] **Step 6: Changelog**
 
 In `CHANGELOG.md`, append as the last bullet under `### Changed` of `## [0.27.0] - 2026-10-04`:
 
@@ -365,7 +365,7 @@ In `CHANGELOG.md`, append as the last bullet under `### Changed` of `## [0.27.0]
 - `validate_completion` marks a minor finding that raises a minor finding of the previous call again with `repeat_of`, whether or not the implementer answered it, and such a finding no longer counts toward the three-minor rung that lifts a verdict to `warn`. A retry made to fix a major finding is no longer pushed back to `warn` by nits it already reported. Findings are matched by category and criterion (or the reviewer's `same_as`), and each earlier finding is matched once, so new findings that share a criterion with an old one still count. An unanswered critical or major finding raised again is unchanged: it carries no `repeat_of` and still counts.
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/verdict/finalize.go internal/verdict/verdict.go internal/verdict/finalize_test.go internal/mcpsrv/finding_rulings.go internal/mcpsrv/carried_minors_test.go CHANGELOG.md
@@ -403,7 +403,7 @@ git commit -m "feat(completion): carried minor findings no longer lift a retry t
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/session/store_test.go`:
 
@@ -509,12 +509,12 @@ func TestValidateCompletion_LightweightEvidencedSkipIsReportedEveryCall(t *testi
 
 `newTestHandlersWithCodescene` is an existing helper in `handlers_test.go`. `findingsOf` is new here and Task 3's tests use it.
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `go test ./internal/session/... ./internal/mcpsrv/... -run 'CodesceneSkipReported|EvidencedSkip|UnevidencedSkip|MissingCodescene'`
 Expected: compile error in `internal/session` (`unknown field CodesceneSkipReported`); once that is fixed, `TestValidateCompletion_EvidencedSkipIsReportedOncePerSession` fails with one finding where it wants none.
 
-- [ ] **Step 3: The session flag**
+- [x] **Step 3: The session flag**
 
 In `internal/session/session.go`, replace
 
@@ -606,7 +606,7 @@ with
 	}
 ```
 
-- [ ] **Step 4: Report the skip once**
+- [x] **Step 4: Report the skip once**
 
 In `internal/mcpsrv/submission_defect.go`, replace
 
@@ -697,12 +697,12 @@ with
 
 The flag is written by the one locked `ApplyReview` the call already makes, so two concurrent calls on a session cannot lose it. `gofmt` realigns the struct literal as shown.
 
-- [ ] **Step 5: Run the packages**
+- [x] **Step 5: Run the packages**
 
 Run: `gofmt -l internal/ && go test -race ./internal/session/... ./internal/mcpsrv/...`
 Expected: no `gofmt` output; `ok` twice. `TestValidateCompletion_CodesceneRequired_DeclaredSkipWithEvidence` (a first call) still passes.
 
-- [ ] **Step 6: Documentation and changelog**
+- [x] **Step 6: Documentation and changelog**
 
 In `README.md`, replace
 
@@ -722,7 +722,7 @@ In `CHANGELOG.md`, append as the last bullet under `### Changed` of `## [0.27.0]
 - With `ANTI_TANGENT_CODESCENE=required`, a CodeScene skip that carries both `skip_reason` and `skip_evidence` is reported once per session: the first `validate_completion` call returns the minor `codescene_skipped` finding and later calls on that session return none. A skip without evidence stays `major` on every call, as does a missing `codescene` argument (`codescene_not_run`). A lightweight call has no session and reports the skip each time.
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/session/session.go internal/session/store.go internal/session/store_test.go internal/mcpsrv/submission_defect.go internal/mcpsrv/handlers.go internal/mcpsrv/codescene_skip_once_test.go README.md CHANGELOG.md
@@ -765,7 +765,7 @@ Depends on Task 1 (a carried minor carries `RepeatOf`) and Task 2 (`findingsOf`,
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/session/store_test.go`:
 
@@ -933,12 +933,12 @@ func TestSnapshotRow_CarriesOverBuildingRuled(t *testing.T) {
 
 `outcomeHandlers` is an existing helper used the same way by `TestSnapshotRow_CarriesCategoriesAndDiffSize` in `completion_row_test.go`; `findingsOf` is in Task 2's `codescene_skip_once_test.go`; `Sessions.SetPreFindings` is an existing store method.
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `go test ./internal/session/... ./internal/mcpsrv/... -run 'OverBuilding|CompletionRows_CountRuled'`
 Expected: compile errors: `unknown field OverBuildingAnswered` in `internal/session`, and `undefined: isOverBuilding`, `undefined: overBuildingReview`, `undefined: countOverBuildingRuled` in `internal/mcpsrv`.
 
-- [ ] **Step 3: The session flag and the record fields**
+- [x] **Step 3: The session flag and the record fields**
 
 In `internal/session/session.go`, replace
 
@@ -1082,7 +1082,7 @@ with
 			OverBuildingRuled: row.OverBuildingRuled,
 ```
 
-- [ ] **Step 4: The over-building review**
+- [x] **Step 4: The over-building review**
 
 In `internal/mcpsrv/finding_rulings.go`, replace
 
@@ -1205,7 +1205,7 @@ func (ob overBuildingReview) ruled(waived []verdict.WaivedFinding) bool {
 
 `verifiedAtCompletion` keeps its two earlier `if` branches; only its last branch changes to the helper call. `completionReview` is the existing struct in this file: `prior` carries each stored prior finding with this call's answer, `rulings` every ruling in force by fingerprint.
 
-- [ ] **Step 5: Wire it into `validate_completion` and the row**
+- [x] **Step 5: Wire it into `validate_completion` and the row**
 
 In `internal/mcpsrv/handlers.go`, replace
 
@@ -1368,12 +1368,12 @@ with
 	if row, ok := h.deps.PlanRuns.UpsertLite(args.PlanRunID, ref, update); ok {
 ```
 
-- [ ] **Step 6: Run the packages**
+- [x] **Step 6: Run the packages**
 
 Run: `gofmt -l internal/ scorecard/ && go test -race ./internal/session/... ./internal/mcpsrv/... ./internal/planrun/... ./scorecard/... && (cd gnome-topbar/daemon && go build ./...)`
 Expected: no `gofmt` output; `ok` four times; no build output.
 
-- [ ] **Step 7: Documentation and changelog**
+- [x] **Step 7: Documentation and changelog**
 
 In `README.md`, replace
 
@@ -1411,7 +1411,7 @@ In `CHANGELOG.md`, append as the last bullet under `### Added` of `## [0.27.0] -
 - `runs.jsonl` task snapshots and `plan-runs.jsonl` rows carry `over_building_ruled`: how many of the task's `validate_completion` calls had an `over_building` finding settled by an answer or a controller ruling instead of by a fix.
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/session/session.go internal/session/store.go internal/session/store_test.go internal/mcpsrv/finding_rulings.go internal/mcpsrv/handlers.go internal/mcpsrv/plan_run_rows.go internal/mcpsrv/run_snapshots.go internal/mcpsrv/over_building_teeth_test.go internal/planrun/planrun.go scorecard/records.go README.md CHANGELOG.md
@@ -1445,7 +1445,7 @@ git commit -m "feat(completion): an over_building finding raised again unanswere
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `internal/prompts/prompts_test.go`:
 
@@ -1472,12 +1472,12 @@ func TestRenderMid_AsksForCorrectnessAndKeepsTheStyleRule(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run it and see it fail**
+- [x] **Step 2: Run it and see it fail**
 
 Run: `go test ./internal/prompts/... -run TestRenderMid_AsksForCorrectness`
 Expected: FAIL, `prompt must have a Correctness section`.
 
-- [ ] **Step 3: Add the section**
+- [x] **Step 3: Add the section**
 
 In `internal/prompts/templates/mid.tmpl`, replace
 
@@ -1505,7 +1505,7 @@ Report only what the submitted files show: quote the offending lines in `evidenc
 Emit each defect as its own finding with `category: correctness`. Set `criterion` to the verbatim AC text when the defect breaks that criterion, and to `correctness` otherwise. Severity: `critical` for data loss, a security hole, or a crash on the main path; `major` for a wrong result or an unhandled failure on a path the task's Goal or acceptance criteria cover; `minor` for a defect on a path the task does not exercise.
 ```
 
-- [ ] **Step 4: Regenerate the golden and read the diff**
+- [x] **Step 4: Regenerate the golden and read the diff**
 
 Run: `go test ./internal/prompts/... -update && git diff --stat internal/prompts/testdata/`
 Expected: one file, `mid_basic.golden`. Any `post_*`, `pre_*`, `plan_*`, `prime_*`, `extract_*`, `lean_*` or `worker_*` golden in the list means the edit landed in the wrong template: revert and redo.
@@ -1513,7 +1513,7 @@ Expected: one file, `mid_basic.golden`. Any `post_*`, `pre_*`, `plan_*`, `prime_
 Run: `go test -race ./internal/prompts/...`
 Expected: `ok`.
 
-- [ ] **Step 5: Documentation and changelog**
+- [x] **Step 5: Documentation and changelog**
 
 In `README.md`, replace
 
@@ -1533,7 +1533,7 @@ In `CHANGELOG.md`, append as the last bullet under `### Changed` of `## [0.27.0]
 - `check_progress` asks the reviewer for correctness defects in the files submitted so far, reported as `correctness`, using a short form of the completion review's section. Unfinished work is not a defect, and the rule against style findings mid-task stays.
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/prompts/templates/mid.tmpl internal/prompts/testdata/mid_basic.golden internal/prompts/prompts_test.go README.md CHANGELOG.md
@@ -1572,7 +1572,7 @@ git commit -m "feat(prompts): check_progress looks for correctness defects"
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `plugin/anti-tangent-guard/hooks/check_progress_nudge_test.py`:
 
@@ -1767,12 +1767,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `python3 -B plugin/anti-tangent-guard/hooks/check_progress_nudge_test.py`
 Expected: `ModuleNotFoundError: No module named 'check_progress_nudge'`.
 
-- [ ] **Step 3: Write the body**
+- [x] **Step 3: Write the body**
 
 Create `plugin/anti-tangent-guard/hooks/check_progress_nudge.py`:
 
@@ -1988,12 +1988,12 @@ Three things here are load-bearing and must not be simplified away:
 3. `claim` raising makes `decide` return 3, not 2. An ask that cannot be recorded would repeat after every edit.
 4. `own_transcript` returns `""` for a subagent whose own transcript cannot be found. Falling back to the parent's would count the controller's edits against the subagent.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `python3 -B plugin/anti-tangent-guard/hooks/check_progress_nudge_test.py`
 Expected: `Ran 27 tests` and `OK`.
 
-- [ ] **Step 5: Write the wrapper**
+- [x] **Step 5: Write the wrapper**
 
 Create `plugin/anti-tangent-guard/hooks/check-progress-nudge`:
 
@@ -2075,7 +2075,7 @@ Then: `chmod 755 plugin/anti-tangent-guard/hooks/check-progress-nudge`
 
 `atg_rotate_trace` and `trace` are the same as in `check-task-start`, with the tag `progress`. The `edits=*` test on exit 2 is what keeps an interpreter failure (Python exits 2 when it cannot open the script) from being read as an ask. `status=$?` after the command substitution is the body's exit status, because the body is the last command of the pipeline inside it.
 
-- [ ] **Step 6: Register it**
+- [x] **Step 6: Register it**
 
 In `plugin/anti-tangent-guard/hooks/hooks.json`, replace
 
@@ -2102,7 +2102,7 @@ with
 Run: `jq -e . plugin/anti-tangent-guard/hooks/hooks.json >/dev/null && echo valid`
 Expected: `valid`.
 
-- [ ] **Step 7: Exercise the wrapper by hand**
+- [x] **Step 7: Exercise the wrapper by hand**
 
 ```bash
 T=$(mktemp -d)
@@ -2137,7 +2137,7 @@ Expected: the `CHECKPOINT DUE: call check_progress` message and `exit=2`; then `
 <ts> | s=- | progress | skip | not-gated
 ```
 
-- [ ] **Step 8: CI and changelog**
+- [x] **Step 8: CI and changelog**
 
 In `.github/workflows/ci.yml`, replace
 
@@ -2160,7 +2160,7 @@ In `CHANGELOG.md`, append as the last bullet under `### Added` of `## [0.27.0] -
 - `anti-tangent-guard` 0.7.0 gains a fourth hook, `check-progress-nudge`: a `PostToolUse` hook on `Edit`/`Write`/`NotebookEdit` that asks a task for a `check_progress` call, once, when it has made ten edits since `validate_task_spec` without one. It reads the session's own transcript (a subagent's, or the main session's), refuses nothing, and is silent with no `validate_task_spec` call and after `validate_completion`. `ANTI_TANGENT_PROGRESS_EDITS` sets the threshold and `ANTI_TANGENT_PROGRESS_GUARD=0` turns the hook off; every failure allows. Trace lines read `progress | pass|nudge|skip | edits=N`, with the subagent in the session column.
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add plugin/anti-tangent-guard/hooks/check_progress_nudge.py plugin/anti-tangent-guard/hooks/check_progress_nudge_test.py plugin/anti-tangent-guard/hooks/check-progress-nudge plugin/anti-tangent-guard/hooks/hooks.json .github/workflows/ci.yml CHANGELOG.md
@@ -2193,7 +2193,7 @@ Depends on Task 5.
 
 **Steps:**
 
-- [ ] **Step 1: Append the cases**
+- [x] **Step 1: Append the cases**
 
 The transcripts are escaped JSON inside JSON, so they are generated, not typed. Save this as `/tmp/add_progress_cases.py` (it is not committed), and run it **once** from the repository root:
 
@@ -2326,12 +2326,12 @@ Expected: `appended 15 cases; guard-evals.json now has 194`.
 Run: `git diff --stat plugin/anti-tangent-guard/evals/guard-evals.json && jq '.evals | length' plugin/anti-tangent-guard/evals/guard-evals.json`
 Expected: one file changed, `1 deletion(-)` (the description line; every other change is an insertion), and `194`. More than one deletion means an existing case was rewritten: `git checkout` the file and rerun the script unchanged.
 
-- [ ] **Step 2: Run the suite and see it fail on the count**
+- [x] **Step 2: Run the suite and see it fail on the count**
 
 Run: `bash plugin/anti-tangent-guard/evals/run.sh | tail -3`
 Expected: `guard-evals.json declares 194 case(s), expected exactly 179`.
 
-- [ ] **Step 3: Update the suite**
+- [x] **Step 3: Update the suite**
 
 In `plugin/anti-tangent-guard/evals/run.sh`, replace
 
@@ -2393,12 +2393,12 @@ echo ""
 echo "════════════════
 ```
 
-- [ ] **Step 4: Run the suite**
+- [x] **Step 4: Run the suite**
 
 Run: `bash plugin/anti-tangent-guard/evals/run.sh | tail -3`
 Expected: `Total: 194 passed, 0 failed, 194 total`, exit 0. A `FAIL` on a `progress-nudge-*` case prints the case's `reason`; fix the hook only if the reason describes behaviour Task 5's acceptance criteria require, otherwise report it.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add plugin/anti-tangent-guard/evals/guard-evals.json plugin/anti-tangent-guard/evals/run.sh
@@ -2438,7 +2438,7 @@ Depends on Task 6 (the case count and the description line it leaves).
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `plugin/anti-tangent-guard/hooks/comment_scan_test.py`, insert this class directly above the final `if __name__ == "__main__":` line, keeping two blank lines before and after it:
 
@@ -2493,12 +2493,12 @@ class ScriptModuleAndComponentExtensions(unittest.TestCase):
         self.assertEqual(violations("Widget.vue", ["  <!-- fixes #1 -->"], ctx), [])
 ```
 
-- [ ] **Step 2: Run them and see them fail**
+- [x] **Step 2: Run them and see them fail**
 
 Run: `python3 -B plugin/anti-tangent-guard/hooks/comment_scan_test.py 2>&1 | tail -5`
 Expected: failures in `ScriptModuleAndComponentExtensions`: `test_the_three_extensions_are_scanned` gets `[]` for `x.mjs`.
 
-- [ ] **Step 3: Extend the scanner and the wrapper's copy of the list**
+- [x] **Step 3: Extend the scanner and the wrapper's copy of the list**
 
 In `plugin/anti-tangent-guard/hooks/comment_scan.py`, replace
 
@@ -2550,7 +2550,7 @@ ATG_SCAN_EXTS=".go .sh .bash .py .ts .tsx .js .jsx .mjs .vue .rs .java .kt .kts 
 Run: `python3 -B plugin/anti-tangent-guard/hooks/comment_scan_test.py 2>&1 | tail -3`
 Expected: `Ran 72 tests` and `OK`.
 
-- [ ] **Step 4: Append the eval cases**
+- [x] **Step 4: Append the eval cases**
 
 Save this as `/tmp/add_extension_cases.py` (not committed) and run it **once** from the repository root:
 
@@ -2630,14 +2630,14 @@ with
 EXPECTED_CASE_COUNT=198
 ```
 
-- [ ] **Step 5: Run the suites**
+- [x] **Step 5: Run the suites**
 
 Run: `bash plugin/anti-tangent-guard/evals/run.sh | tail -1`
 Expected: `Total: 198 passed, 0 failed, 198 total`.
 
 `fp-report.sh` and the corpus test read committed content (`HEAD` blobs), so commit first (Step 7) and run them in Step 8.
 
-- [ ] **Step 6: Documentation and changelog**
+- [x] **Step 6: Documentation and changelog**
 
 In `plugin/anti-tangent-guard/README.md`, replace
 
@@ -2661,14 +2661,14 @@ In `CHANGELOG.md`, append as the last bullet under `### Changed` of `## [0.27.0]
 - `anti-tangent-guard`'s comment scan covers `.mjs` and `.vue` (JavaScript rules) and `.kts` (Kotlin rules). The `<!-- -->` comments of a `.vue` template block are not recognised.
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add plugin/anti-tangent-guard/hooks/comment_scan.py plugin/anti-tangent-guard/hooks/check-comment-write plugin/anti-tangent-guard/hooks/comment_scan_test.py plugin/anti-tangent-guard/evals/guard-evals.json plugin/anti-tangent-guard/evals/run.sh plugin/anti-tangent-guard/README.md CHANGELOG.md
 git commit -m "feat(guard): scan .mjs, .kts and .vue comments"
 ```
 
-- [ ] **Step 8: Run the false-positive gate on the committed tree**
+- [x] **Step 8: Run the false-positive gate on the committed tree**
 
 Run: `bash plugin/anti-tangent-guard/evals/fp-report.sh | tail -2 && python3 -B plugin/anti-tangent-guard/evals/build-jev-comments-test.py 2>&1 | tail -1`
 Expected: `scanned hits: 21   classified: 21`, `FALSE POSITIVES: 0`, `OK`. An `UNCLASSIFIED hit` names a comment this branch added that matches a history tell: rewrite that comment (it breaks the comment policy), amend, and rerun. Do not add it to `fp-class.tsv`.
@@ -2706,7 +2706,7 @@ Depends on Tasks 5–7 (it documents them, and Task 7 leaves the eval count at 1
 
 **Steps:**
 
-- [ ] **Step 1: Protocol wording**
+- [x] **Step 1: Protocol wording**
 
 In `docs/protocol/implementer.md`, replace
 
@@ -2764,7 +2764,7 @@ with
 with mid calls when the guard asks or drift is suspected
 ```
 
-- [ ] **Step 2: Check the budget and resync the bundle**
+- [x] **Step 2: Check the budget and resync the bundle**
 
 ```bash
 wc -c docs/protocol/implementer.md docs/protocol/core.md
@@ -2775,7 +2775,7 @@ diff -r docs/protocol plugin/anti-tangent-protocol/protocol && echo in-sync
 
 Expected: `15879 docs/protocol/implementer.md`, `15970 docs/protocol/core.md`, `in-sync`. A different byte count means a replacement was not applied exactly; a count of 16000 or more fails CI.
 
-- [ ] **Step 3: The lightweight dispatch example**
+- [x] **Step 3: The lightweight dispatch example**
 
 In `examples/lightweight-dispatch.md`, replace
 
@@ -2789,7 +2789,7 @@ with
 - **Skip** `check_progress` (the guard's reminder needs a `validate_task_spec` call, so it never fires here).
 ```
 
-- [ ] **Step 4: The guard plugin's README**
+- [x] **Step 4: The guard plugin's README**
 
 In `plugin/anti-tangent-guard/README.md`, replace
 
@@ -2976,7 +2976,7 @@ itself, the semantic tier — check-task-start's start gate, and
 check-progress-nudge's once-per-task reminder. See
 ```
 
-- [ ] **Step 5: The root README and CLAUDE.md**
+- [x] **Step 5: The root README and CLAUDE.md**
 
 In `README.md`, replace
 
@@ -3068,7 +3068,7 @@ with
 leaving the pattern tier, the completion gate and the start gate untouched, and `ANTI_TANGENT_PROGRESS_GUARD=0` turns off the progress reminder; each governs
 ```
 
-- [ ] **Step 6: The plugin manifests**
+- [x] **Step 6: The plugin manifests**
 
 In `plugin/anti-tangent-guard/.claude-plugin/plugin.json`, replace
 
@@ -3159,7 +3159,7 @@ ANTI_TANGENT_COMMENT_GUARD=0 (comment scan, both hooks), ANTI_TANGENT_PROGRESS_G
 Run: `jq -e . plugin/anti-tangent-guard/.claude-plugin/plugin.json .claude-plugin/marketplace.json >/dev/null && echo valid`
 Expected: `valid`.
 
-- [ ] **Step 7: Changelog**
+- [x] **Step 7: Changelog**
 
 In `CHANGELOG.md`, append as the last bullet under `### Changed` of `## [0.27.0] - 2026-10-04`:
 
@@ -3167,7 +3167,7 @@ In `CHANGELOG.md`, append as the last bullet under `### Changed` of `## [0.27.0]
 - The implementer protocol no longer calls `check_progress` optional and low-signal: the dispatch clause says to call it when the guard asks, or when drift is suspected.
 ```
 
-- [ ] **Step 8: Run everything**
+- [x] **Step 8: Run everything**
 
 ```bash
 go build ./... && go test -race ./...
@@ -3177,7 +3177,7 @@ bash plugin/anti-tangent-guard/evals/run.sh | tail -1
 
 Expected: `ok` for every package in both modules; `Total: 198 passed, 0 failed, 198 total`.
 
-- [ ] **Step 9: Commit, then run the gates that read committed content**
+- [x] **Step 9: Commit, then run the gates that read committed content**
 
 ```bash
 git add docs/protocol plugin/anti-tangent-protocol/protocol examples/lightweight-dispatch.md plugin/anti-tangent-guard/README.md README.md CLAUDE.md plugin/anti-tangent-guard/.claude-plugin/plugin.json .claude-plugin/marketplace.json CHANGELOG.md
