@@ -123,3 +123,20 @@ func TestDiffLineCounts_FileBoundaryEndsTheHunk(t *testing.T) {
 	assert.Equal(t, 1, added)
 	assert.Equal(t, 1, removed, "a later file's metadata is outside every hunk")
 }
+
+func TestDiffLineCounts_HeaderShapedLinesInsideAHunkAreCounted(t *testing.T) {
+	diff := "--- a/q.sql\n" +
+		"+++ b/q.sql\n" +
+		"@@ -1,2 +1,2 @@\n" +
+		" select 1;\n" +
+		"--- old comment\n" +
+		"+++ new marker\n" +
+		"--- a/r.sql\n" +
+		"+++ b/r.sql\n" +
+		"@@ -1 +1 @@\n" +
+		"-x\n" +
+		"+y\n"
+	added, removed := diffLineCounts(diff)
+	assert.Equal(t, 2, added, "the in-hunk '++ ' line and the second file's addition")
+	assert.Equal(t, 2, removed, "the in-hunk '-- ' line and the second file's removal")
+}

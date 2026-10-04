@@ -3,6 +3,7 @@ package mcpsrv
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,37 +90,50 @@ func (h *handlers) appendPlanLedger(runID string, row planrun.TaskRow) {
 	}
 }
 
-// diffLineCounts returns how many lines a unified diff adds and removes.
-// Only lines inside a hunk are counted: counting starts at an "@@" line and
-// stops at the next "diff --git " line, so a preamble such as a commit message
-// and a later file's metadata are both ignored. Within the hunks, a "--- " line counts as a file
-// header only when a "+++ " line follows it directly, so a removed line whose
-// own text begins with "-- " is still counted as a removal.
-func diffLineCounts(diff string) (added, removed int) {
-	if diff == "" {
-		return 0, 0
+// hunkSpan returns how many old and new lines the hunk a header line opens
+// covers, and false when line is not a hunk header.
+func hunkSpan(line string) (oldLines, newLines int, ok bool) {
+	m := hunkHeaderRe.FindStringSubmatch(line)
+	if m == nil {
+		return 0, 0, false
 	}
-	lines := strings.Split(diff, "\n")
-	inHunk := false
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		if strings.HasPrefix(line, "diff --git ") {
-			inHunk = false
+	oldLines, newLines = 1, 1
+	if m[2] != "" {
+		oldLines, _ = strconv.Atoi(m[2])
+	}
+	if m[4] != "" {
+		newLines, _ = strconv.Atoi(m[4])
+	}
+	return oldLines, newLines, true
+}
+
+// diffLineCounts returns how many lines a unified diff adds and removes. It
+// counts only inside hunks, and a hunk ends when the line counts its header
+// declares are used up. That is what tells a file header from a changed line
+// that looks like one: a removed line whose text begins with "-- " is counted,
+// while the "--- " and "+++ " lines that open the next file are not, with or
+// without a "diff --git" line between files.
+func diffLineCounts(diff string) (added, removed int) {
+	oldLeft, newLeft := 0, 0
+	for _, line := range strings.Split(diff, "\n") {
+		if o, n, ok := hunkSpan(line); ok {
+			oldLeft, newLeft = o, n
 			continue
 		}
-		if !inHunk {
-			inHunk = strings.HasPrefix(line, "@@")
-			continue
-		}
-		if strings.HasPrefix(line, "--- ") && i+1 < len(lines) && strings.HasPrefix(lines[i+1], "+++ ") {
-			i++
+		if oldLeft <= 0 && newLeft <= 0 {
 			continue
 		}
 		switch {
 		case strings.HasPrefix(line, "+"):
 			added++
+			newLeft--
 		case strings.HasPrefix(line, "-"):
 			removed++
+			oldLeft--
+		case strings.HasPrefix(line, "\\"):
+		default:
+			oldLeft--
+			newLeft--
 		}
 	}
 	return added, removed
