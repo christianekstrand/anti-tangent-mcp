@@ -65,6 +65,14 @@ const (
 	// for claims about files that were actually attached; the ground rules
 	// forbid emitting it about anything outside the attached set.
 	CategoryContradictedCodebaseClaim Category = "contradicted_codebase_claim"
+	// CategoryCorrectness is emitted by the completion review for a defect the
+	// submitted evidence shows: a wrong result, a dropped failure, an
+	// unprotected shared write. CategoryTestAdequacy is its counterpart for a
+	// test that would not fail if the behaviour it covers broke. Neither is in
+	// applySeverityFloor's list: both report what the evidence shows, so the
+	// reviewer's chosen severity is preserved.
+	CategoryCorrectness  Category = "correctness"
+	CategoryTestAdequacy Category = "test_adequacy"
 	// CategoryMalformedEvidence is server-only. It is emitted exclusively
 	// by the validate_completion evidence-shape guard, which constructs
 	// the envelope directly without round-tripping through Parse(). It is
@@ -102,7 +110,7 @@ type Finding struct {
 	Suggestion string   `json:"suggestion" jsonschema:"The concrete next action that would resolve the finding."`
 	// RepeatOf is server-set on validate_completion: the ID of a prior finding
 	// the implementer answered and the reviewer raised again.
-	RepeatOf string `json:"repeat_of,omitempty" jsonschema:"Server-set: the id of an earlier finding the implementer answered that this finding raises again."`
+	RepeatOf string `json:"repeat_of,omitempty" jsonschema:"Server-set: the id of an earlier finding this finding raises again: one the implementer answered, or a minor finding carried over from the previous validate_completion call. A minor finding that carries it does not count toward the verdict."`
 	// SameAs is the reviewer's claim that this finding raises again one its
 	// prompt showed. The server reads it and clears it before responding.
 	SameAs *string `json:"same_as,omitempty" jsonschema:"Reviewer-set: the id of an earlier finding shown in the prompt that this finding raises again, or null."`

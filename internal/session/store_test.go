@@ -216,3 +216,40 @@ func TestStore_ExpiresAt(t *testing.T) {
 	require.True(t, ok)
 	assert.WithinDuration(t, time.Now().Add(time.Hour), exp, 5*time.Second)
 }
+
+func TestStore_CodesceneSkipReportedIsSticky(t *testing.T) {
+	s := NewStore(time.Hour)
+	sess := s.Create(TaskSpec{Title: "t"}, "")
+	st, _ := s.ReviewState(sess.ID)
+	assert.False(t, st.CodesceneSkipReported)
+
+	require.True(t, s.ApplyReview(sess.ID, ReviewUpdate{CodesceneSkipReported: true}))
+	require.True(t, s.ApplyReview(sess.ID, ReviewUpdate{}))
+	st, _ = s.ReviewState(sess.ID)
+	assert.True(t, st.CodesceneSkipReported, "a later review that reports no skip must not clear the flag")
+}
+
+func TestStore_OverBuildingAnsweredIsSticky(t *testing.T) {
+	s := NewStore(time.Hour)
+	sess := s.Create(TaskSpec{Title: "t"}, "")
+	require.True(t, s.ApplyReview(sess.ID, ReviewUpdate{OverBuildingAnswered: true}))
+	require.True(t, s.ApplyReview(sess.ID, ReviewUpdate{}))
+	st, _ := s.ReviewState(sess.ID)
+	assert.True(t, st.OverBuildingAnswered, "an answer sent once must still stand after later reviews")
+}
+
+func TestStore_CodesceneEventKeyIsReplacedOnlyByANonEmptyKey(t *testing.T) {
+	s := NewStore(time.Hour)
+	sess := s.Create(TaskSpec{Title: "t", Goal: "g"}, "")
+
+	s.ApplyReview(sess.ID, ReviewUpdate{CodesceneEventKey: "aaaa"})
+	s.ApplyReview(sess.ID, ReviewUpdate{})
+	st, ok := s.ReviewState(sess.ID)
+	if !ok || st.CodesceneEventKey != "aaaa" {
+		t.Fatalf("an update without a key must leave the stored one, got %q", st.CodesceneEventKey)
+	}
+	s.ApplyReview(sess.ID, ReviewUpdate{CodesceneEventKey: "bbbb"})
+	if st, _ := s.ReviewState(sess.ID); st.CodesceneEventKey != "bbbb" {
+		t.Fatalf("a new key must replace the stored one, got %q", st.CodesceneEventKey)
+	}
+}

@@ -2489,3 +2489,83 @@ func TestPrompts_PlanReuseCarriesItsContextLine(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, strings.Count(pre.User, want), "not in single task spec")
 }
+
+func TestRenderPost_AsksForCorrectnessBeforeCommentHygiene(t *testing.T) {
+	out, err := RenderPost(PostInput{
+		Spec:         sampleSpec(),
+		Summary:      "Implemented the handler.",
+		FinalDiff:    "--- a/h.go\n+++ b/h.go\n@@ -1 +1 @@\n-old\n+new\n",
+		TestEvidence: "go test ./... PASS",
+	})
+	require.NoError(t, err)
+	correctness := strings.Index(out.User, "### Correctness")
+	tests := strings.Index(out.User, "### Test adequacy")
+	comments := strings.Index(out.User, "### Comment hygiene")
+	require.NotEqual(t, -1, correctness, "prompt must have a Correctness section")
+	require.NotEqual(t, -1, tests, "prompt must have a Test adequacy section")
+	require.NotEqual(t, -1, comments)
+	assert.Less(t, correctness, tests)
+	assert.Less(t, tests, comments)
+	assert.Contains(t, out.User, "`category: correctness`")
+	assert.Contains(t, out.User, "`category: test_adequacy`")
+	assert.Contains(t, out.User, "Do not speculate about code that was not submitted")
+	assert.Contains(t, out.User, "that the submitted code contradicts")
+	assert.Contains(t, out.User, "report a defect only in code the summary or an acceptance criterion ties to this task")
+	assert.Contains(t, out.User, "OR for a `correctness` or `test_adequacy` finding that meets the severity bar in its own section below")
+}
+
+func TestRenderMid_AsksForCorrectnessAndKeepsTheStyleRule(t *testing.T) {
+	out, err := RenderMid(MidInput{
+		Spec:      sampleSpec(),
+		WorkingOn: "writing the handler",
+		Files:     []File{{Path: "handlers/health.go", Content: "package handlers\n"}},
+	})
+	require.NoError(t, err)
+	style := strings.Index(out.User, "DO NOT critique code style or polish at this stage.")
+	correctness := strings.Index(out.User, "### Correctness")
+	overBuilding := strings.Index(out.User, "### Over-building")
+	require.NotEqual(t, -1, style, "the rule against style findings must stay")
+	require.NotEqual(t, -1, correctness, "prompt must have a Correctness section")
+	require.NotEqual(t, -1, overBuilding)
+	assert.Less(t, style, correctness)
+	assert.Less(t, correctness, overBuilding)
+	assert.Contains(t, out.User, "`category: correctness`")
+	assert.Contains(t, out.User, "Do not speculate about code that was not submitted")
+	assert.Contains(t, out.User, "unfinished, not wrong")
+	assert.NotContains(t, out.User, "test_adequacy", "test adequacy is judged at completion only")
+}
+
+func TestRenderPost_ReportsMandatedOverBuildingUnderItsOwnCriterion(t *testing.T) {
+	out, err := RenderPost(PostInput{Spec: sampleSpec(), Summary: "Implemented the handler.", TestEvidence: "PASS"})
+	require.NoError(t, err)
+	mandated := strings.Index(out.User, "`criterion: over_building_mandated`")
+	own := strings.Index(out.User, "Report every other instance in ONE finding: `category: quality`, `criterion: over_building`")
+	require.NotEqual(t, -1, mandated, "mandated structure needs its own criterion")
+	require.NotEqual(t, -1, own)
+	assert.Less(t, mandated, own)
+}
+
+func TestRenderPlanFindingsOnly_ShowsEarlierPlanFindingsInTheSuffixOnly(t *testing.T) {
+	in := PlanInput{PlanText: "# Plan\n\n### Task 1: First\n\nbody.\n### Task 2: Second\n\nbody.\n"}
+	plain, err := RenderPlanFindingsOnly(in)
+	require.NoError(t, err)
+	assert.NotContains(t, plain.User, "## Earlier plan-level findings")
+
+	in.PriorPlanFindings = []verdict.Finding{
+		{Severity: verdict.SeverityMajor, Category: verdict.CategoryAmbiguousSpec, Criterion: "task order", Evidence: "Task 2 needs\nTask 3's type"},
+		{Severity: verdict.SeverityMinor, Category: verdict.CategoryQuality, Criterion: "intro", Evidence: "no architecture section"},
+	}
+	out, err := RenderPlanFindingsOnly(in)
+	require.NoError(t, err)
+	golden(t, "plan_findings_only_with_prior_findings", out.System+"\n---USER---\n"+out.User)
+
+	assert.Equal(t, plain.UserPrefix, out.UserPrefix, "the prefix shared with the chunk prompts must not change")
+	assert.Contains(t, out.UserSuffix, "## Earlier plan-level findings")
+	assert.Contains(t, out.UserSuffix, "- [major][ambiguous_spec] task order — Task 2 needs Task 3's type\n",
+		"a multi-line field is folded onto its bullet")
+	assert.Contains(t, out.UserSuffix, "- [minor][quality] intro — no architecture section\n")
+	assert.Less(t, strings.Index(out.UserSuffix, "## Earlier plan-level findings"), strings.Index(out.UserSuffix, "## Output"))
+	assert.Contains(t, out.UserSuffix, "only if it is critical or\nmajor, or one the sections below require",
+		"the limit on new findings must not forbid the findings later sections make mandatory")
+	assert.NotContains(t, out.UserSuffix, "the edit\nintroduced", "the reviewer is not shown what the edit changed")
+}

@@ -30,6 +30,8 @@
               "unverifiable_codebase_claim",
               "convention_deviation",
               "attestation_contradiction",
+              "correctness",
+              "test_adequacy",
               "kb_gap",
               "ambiguous_pick",
               "missing_index_entry",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,17 +30,21 @@ type RecordReviewOutcomeArgs struct {
 	PlanRunID         string                       `json:"plan_run_id" jsonschema:"The plan_run_id returned by validate_plan for the run the review covered."`
 	Source            string                       `json:"source" jsonschema:"final_review for the controller's whole-plan review, review_now for a human-adjudicated PR review."`
 	ReviewerModel     string                       `json:"reviewer_model,omitempty" jsonschema:"provider:model that performed the review, when known. At most 100 characters, no control character."`
-	ImplementerModels []OutcomeImplementerModelArg `json:"implementer_models,omitempty" jsonschema:"The model each task was dispatched on. The controller knows this; the server cannot see it."`
+	ImplementerModels []OutcomeImplementerModelArg `json:"implementer_models,omitempty" jsonschema:"The model each task was dispatched on, one entry per dispatched task. The controller knows this; the server cannot see it. For final_review, tasks left out are listed in missing_implementer_models and scored in an unknown cohort."`
 	Findings          []OutcomeFindingArg          `json:"findings" jsonschema:"Every finding the review kept, attributed to a task. An empty array means the review found nothing, which is itself recorded."`
 }
 
 type RecordReviewOutcomeResult struct {
-	Recorded     bool               `json:"recorded"`
-	Reason       string             `json:"reason,omitempty"`
-	RunKnown     bool               `json:"run_known"`
-	TasksScored  int                `json:"tasks_scored"`
-	Escapes      []scorecard.Escape `json:"escapes"`
-	SummaryBlock string             `json:"summary_block"`
+	Recorded    bool               `json:"recorded"`
+	Reason      string             `json:"reason,omitempty"`
+	RunKnown    bool               `json:"run_known"`
+	TasksScored int                `json:"tasks_scored"`
+	Escapes     []scorecard.Escape `json:"escapes"`
+	// MissingImplementerModels lists, for a final_review call, the tasks that
+	// have a final verdict and that the call named no implementer model for.
+	// It is always empty for review_now.
+	MissingImplementerModels []int  `json:"missing_implementer_models"`
+	SummaryBlock             string `json:"summary_block"`
 }
 
 func recordReviewOutcomeTool() *mcp.Tool {
@@ -67,7 +72,7 @@ func (h *handlers) RecordReviewOutcome(_ context.Context, _ *mcp.CallToolRequest
 }
 
 func (h *handlers) recordReviewOutcome(args RecordReviewOutcomeArgs) RecordReviewOutcomeResult {
-	res := RecordReviewOutcomeResult{Escapes: []scorecard.Escape{}}
+	res := RecordReviewOutcomeResult{Escapes: []scorecard.Escape{}, MissingImplementerModels: []int{}}
 	if h.deps.Stats == nil {
 		res.Reason = "stats disabled: set ANTI_TANGENT_STATS_DIR to record review outcomes"
 		return res
@@ -94,6 +99,9 @@ func (h *handlers) recordReviewOutcome(args RecordReviewOutcomeArgs) RecordRevie
 	res.Recorded = true
 	var snapshotted bool
 	res.Escapes, res.TasksScored, snapshotted = scorecard.RunEscapes(lines, o)
+	if args.Source == scorecard.SourceFinalReview {
+		res.MissingImplementerModels = missingImplementerModels(scorecard.TasksWithVerdict(lines), args.ImplementerModels)
+	}
 	// A run minted before stats were enabled is live but has no snapshot
 	// lines; it is still a run this server knows.
 	_, live := h.deps.PlanRuns.PlanTaskCount(runID)
@@ -119,6 +127,22 @@ func outcomeLineFromArgs(runHash string, args RecordReviewOutcomeArgs) scorecard
 		o.ImplementerModels = append(o.ImplementerModels, scorecard.ImplementerModel{TaskIndex: m.TaskIndex, Model: strings.TrimSpace(m.Model)})
 	}
 	return o
+}
+
+// missingImplementerModels returns the entries of tasks, in order, that models
+// names no model for.
+func missingImplementerModels(tasks []int, models []OutcomeImplementerModelArg) []int {
+	named := make(map[int]bool, len(models))
+	for _, m := range models {
+		named[m.TaskIndex] = true
+	}
+	out := []int{}
+	for _, idx := range tasks {
+		if !named[idx] {
+			out = append(out, idx)
+		}
+	}
+	return out
 }
 
 func validateOutcomeArgs(runID string, args RecordReviewOutcomeArgs) string {
@@ -216,6 +240,13 @@ func formatOutcomeSummary(args RecordReviewOutcomeArgs, res RecordReviewOutcomeR
 	fmt.Fprintf(&b, "recorded: yes · run known: %s · tasks scored: %d · escapes: %d\n", known, res.TasksScored, len(res.Escapes))
 	for _, e := range res.Escapes {
 		fmt.Fprintf(&b, "- task %d: anti-tangent %s, review found %s\n", e.TaskIndex, escapeBlockValue(e.AntiTangentVerdict), escapeBlockValue(e.OutcomeSeverity))
+	}
+	if len(res.MissingImplementerModels) > 0 {
+		idx := make([]string, len(res.MissingImplementerModels))
+		for i, n := range res.MissingImplementerModels {
+			idx[i] = strconv.Itoa(n)
+		}
+		fmt.Fprintf(&b, "implementer model missing for tasks: %s — call again with implementer_models for every task\n", strings.Join(idx, ", "))
 	}
 	return b.String()
 }

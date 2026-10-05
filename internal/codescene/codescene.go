@@ -4,9 +4,9 @@
 // repository, so both internal/stats and internal/mcpsrv can depend on it
 // without an import cycle.
 //
-// anti-tangent never calls CodeScene. It receives a digest a caller computed
-// (the same reduction examples/hooks/codescene-log.sh performs) and treats it
-// as caller-attested, exactly like pinned_by.
+// anti-tangent never calls CodeScene. It receives a digest a caller computed,
+// or the raw analyze_change_set output and reduces that itself, and treats
+// either as caller-attested, exactly like pinned_by.
 package codescene
 
 import (
@@ -27,10 +27,10 @@ type Verdicts struct {
 // No file paths, no code, no function names — privacy parity with the rest of
 // the stats subsystem.
 //
-// Ran and SkipReason are omitempty and absent from hook-written records; the
-// hook has no notion of a deliberate skip, so a record it wrote unmarshals
-// with Ran=false and is distinguished from a caller-declared skip by
-// SkipReason being empty too.
+// Ran, SkipReason, SkipEvidence and BaseRef are omitempty and absent from the
+// stats event file: every record there is a run, so a record unmarshals with
+// Ran=false and is distinguished from a caller-declared skip by SkipReason
+// being empty too.
 type Digest struct {
 	Ran            bool           `json:"ran,omitempty" jsonschema:"True when a CodeScene analysis of the task's changes actually ran."`
 	SkipReason     string         `json:"skip_reason,omitempty" jsonschema:"Why the analysis did not run, when ran is false. The first 300 characters are kept."`
@@ -102,8 +102,8 @@ func hasNonNull(present map[string]json.RawMessage, key string) bool {
 }
 
 // UnmarshalJSON accepts both the digest shape and CodeScene's raw
-// analyze_change_set output, reducing quality_gates and results[] the way
-// examples/hooks/codescene-log.sh does. A digest field present in the input
+// analyze_change_set output, reducing quality_gates and results[] to the
+// digest's counts. A digest field present in the input
 // always wins over the value derived from raw keys. Unknown keys are ignored,
 // and each raw key is decoded on its own, so one of the wrong type is ignored
 // without disturbing the other: the argument is optional, and a malformed side

@@ -825,13 +825,13 @@ func TestValidatePlan_RollsUpTaskUnverifiableFindings(t *testing.T) {
 	}`)
 	pr, err := runValidatePlanWithReviewerJSON(t, raw, 2)
 	require.NoError(t, err)
-	require.Len(t, pr.PlanFindings, 1)
-	assert.Equal(t, verdict.CategoryUnverifiableCodebaseClaim, pr.PlanFindings[0].Category)
-	assert.Equal(t, "codebase_reference_checklist", pr.PlanFindings[0].Criterion)
-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Task 1")
-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Foo.kt:10")
-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Task 2")
-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Baz.qux")
+	assert.Empty(t, pr.PlanFindings, "the checklist is not a finding")
+	assert.Equal(t, []string{
+		"Task 1: Task 1 cites Foo.kt:10 and Foo.bar",
+		"Task 2: Task 2 cites Baz.qux",
+	}, pr.CodebaseReferenceChecklist)
+	assert.Contains(t, pr.SummaryBlock, "  checklist:     2 unverified codebase reference(s), not findings\n")
+	assert.Contains(t, pr.SummaryBlock, "    - Task 2: Task 2 cites Baz.qux\n")
 	assert.Empty(t, pr.Tasks[0].Findings)
 	assert.Empty(t, pr.Tasks[1].Findings)
 }
@@ -882,10 +882,11 @@ func TestValidatePlan_MixedFindings_PlanLevelDerivesPassTaskLevelDerivesWarn(t *
 	require.Len(t, pr.Tasks[0].Findings, 1)
 	assert.Equal(t, verdict.CategoryAmbiguousSpec, pr.Tasks[0].Findings[0].Category)
 	assert.Equal(t, verdict.VerdictWarn, pr.Tasks[0].Verdict, "task ladder derives warn from one major finding")
-	// Plan-level: the rolled-up codebase_reference_checklist (1 minor) drives
-	// the ladder to pass. Plan-level verdict is derived from PlanFindings only;
-	// task-level severity does NOT propagate up to the plan verdict.
-	assert.Equal(t, verdict.VerdictPass, pr.PlanVerdict, "plan ladder derives pass from one minor plan-level finding")
+	// Plan-level: the unverifiable claim moved to the checklist, which is not
+	// a finding, so the plan has none. Plan-level verdict is derived from
+	// PlanFindings only; task-level severity does NOT propagate up to it.
+	assert.Equal(t, verdict.VerdictPass, pr.PlanVerdict, "plan ladder derives pass from no plan-level finding")
+	assert.Len(t, pr.CodebaseReferenceChecklist, 1)
 }
 
 func TestValidatePlan_PreservesPlanLevelUnverifiableBesideTaskRollup(t *testing.T) {
@@ -898,10 +899,9 @@ func TestValidatePlan_PreservesPlanLevelUnverifiableBesideTaskRollup(t *testing.
 	}`)
 	pr, err := runValidatePlanWithReviewerJSON(t, raw, 1)
 	require.NoError(t, err)
-	require.Len(t, pr.PlanFindings, 2)
+	require.Len(t, pr.PlanFindings, 1)
 	assert.Equal(t, "plan", pr.PlanFindings[0].Criterion)
-	assert.Equal(t, "codebase_reference_checklist", pr.PlanFindings[1].Criterion)
-	assert.Contains(t, pr.PlanFindings[1].Evidence, "Task 1")
+	assert.Equal(t, []string{"Task 1: Task 1 cites Foo.kt"}, pr.CodebaseReferenceChecklist)
 }
 
 func TestValidatePlan_ChunkedUnverifiableFindingsRollUp(t *testing.T) {
@@ -947,10 +947,8 @@ func TestValidatePlan_ChunkedUnverifiableFindingsRollUp(t *testing.T) {
 	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: buildPlanWithNTasks(9)})
 	require.NoError(t, err)
 	pr.PlanFindings = stripPlanDeprecationFinding(pr.PlanFindings)
-	require.Len(t, pr.PlanFindings, 1)
-	assert.Equal(t, "codebase_reference_checklist", pr.PlanFindings[0].Criterion)
-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Task 1")
-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Task 9")
+	assert.Empty(t, pr.PlanFindings)
+	assert.Equal(t, []string{"Task 1: Task 1 cites Foo.kt", "Task 9: Task 9 cites Baz.kt"}, pr.CodebaseReferenceChecklist)
 }
 
 // TestValidatePlan_MultipleUnverifiableUnderSameTaskJoinedWithSemicolon
@@ -973,9 +971,7 @@ func TestValidatePlan_MultipleUnverifiableUnderSameTaskJoinedWithSemicolon(t *te
 	}`)
 	pr, err := runValidatePlanWithReviewerJSON(t, raw, 1)
 	require.NoError(t, err)
-	require.Len(t, pr.PlanFindings, 1)
-	assert.Equal(t, 1, strings.Count(pr.PlanFindings[0].Evidence, "Task 1:"))
-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Foo.kt:10; Bar.kt:20")
+	assert.Equal(t, []string{"Task 1: Foo.kt:10; Bar.kt:20"}, pr.CodebaseReferenceChecklist)
 }
 
 // TestValidatePlan_EmptyFindings_LadderDerivesPass locks in the
@@ -1017,14 +1013,8 @@ func TestValidatePlan_RollupFallsBackToMergedPositionForBadTaskIndex(t *testing.
 	}`)
 	pr, err := runValidatePlanWithReviewerJSON(t, raw, 2)
 	require.NoError(t, err)
-	require.Len(t, pr.PlanFindings, 1)
-	// Without the fallback the rollup would emit "Task 0:" and "Task 1:".
-	// With the fallback the first task lands at merged-position 1 and the
-	// second keeps its reviewer-provided index of 1 — but the fallback only
-	// fires on the first (TaskIndex == 0). Either way, no "Task 0:" appears
-	// and merged-position 1 is referenced at least once.
-	assert.NotContains(t, pr.PlanFindings[0].Evidence, "Task 0:")
-	assert.Contains(t, pr.PlanFindings[0].Evidence, "Task 1:")
+	// A reviewer's 0-based task_index must not label an entry "Task 0:".
+	assert.Equal(t, []string{"Task 1: Foo.kt", "Task 2: Bar.kt"}, pr.CodebaseReferenceChecklist)
 }
 
 // ---------------------------------------------------------------------------
@@ -2142,7 +2132,7 @@ func TestValidatePlan_ContradictionWithoutAttachmentsIsDemoted(t *testing.T) {
 		all = append(all, tk.Findings...)
 	}
 	var contradictions, demoted int
-	var planLevel, checklist verdict.Finding
+	var planLevel verdict.Finding
 	for _, f := range all {
 		switch f.Category {
 		case verdict.CategoryContradictedCodebaseClaim:
@@ -2151,16 +2141,12 @@ func TestValidatePlan_ContradictionWithoutAttachmentsIsDemoted(t *testing.T) {
 			demoted++
 			assert.Equal(t, verdict.SeverityMinor, f.Severity,
 				"a demoted contradiction must land on the unverifiable floor")
-			if f.Criterion == "codebase_reference_checklist" {
-				checklist = f
-			} else {
-				planLevel = f
-			}
+			planLevel = f
 		}
 	}
 	assert.Zero(t, contradictions,
 		"no contradicted_codebase_claim may survive a call with no context_paths")
-	assert.Equal(t, 2, demoted, "both the plan-level and the per-task finding must be demoted")
+	assert.Equal(t, 1, demoted, "the plan-level finding must be demoted and stay a finding")
 
 	// Demotion is a rewrite of category+severity, NOT a redaction: the
 	// observation is still worth surfacing. Asserting category and severity
@@ -2171,14 +2157,11 @@ func TestValidatePlan_ContradictionWithoutAttachmentsIsDemoted(t *testing.T) {
 	assert.Equal(t, "e", planLevel.Evidence, "the reviewer's evidence must survive demotion")
 	assert.Equal(t, "s", planLevel.Suggestion, "the reviewer's suggestion must survive demotion")
 
-	// The per-task twin is rolled up into the plan-level
-	// codebase_reference_checklist (stripTaskUnverifiableFindings), which
-	// supplies its own criterion and suggestion — but the reviewer's evidence
-	// text must still reach the human there, verbatim, under its task number.
-	require.Equal(t, "codebase_reference_checklist", checklist.Criterion,
-		"the demoted per-task finding must roll up, not vanish")
-	assert.Equal(t, "Task 1: e", checklist.Evidence,
-		"the rolled-up entry must carry the reviewer's own evidence text")
+	// The per-task twin moves to codebase_reference_checklist
+	// (stripTaskUnverifiableFindings): the reviewer's evidence text must still
+	// reach the human there, verbatim, under its task number.
+	assert.Equal(t, []string{"Task 1: e"}, pr.CodebaseReferenceChecklist,
+		"the demoted per-task finding must reach the checklist, not vanish")
 }
 
 // The gap between the two tests above: the demotion used to be gated on
@@ -2218,7 +2201,8 @@ func TestValidatePlan_ContradictionAboutUnattachedFileIsDemotedDespiteAttachment
 	}
 	assert.Zero(t, contradictions,
 		"a contradiction naming none of the attached files must not survive just because something else was attached")
-	assert.Equal(t, 2, demoted, "both the plan-level and the per-task finding must be demoted")
+	assert.Equal(t, 1, demoted, "the plan-level finding must be demoted and stay a finding")
+	assert.Len(t, pr.CodebaseReferenceChecklist, 1, "the demoted per-task finding must reach the checklist")
 }
 
 // The fail-open half of the same rule. The ground rules ask the reviewer to

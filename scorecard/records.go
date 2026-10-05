@@ -8,6 +8,7 @@ package scorecard
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -52,6 +53,14 @@ type TaskSnapshot struct {
 	CodesceneState string         `json:"codescene_state,omitempty"`
 	Calls          []ToolCall     `json:"calls,omitempty"`
 	CallsDropped   int            `json:"calls_dropped,omitempty"`
+	// Categories counts the findings the task's validate_completion calls
+	// returned, per finding category, summed over the calls.
+	Categories   map[string]int `json:"categories,omitempty"`
+	LinesAdded   int            `json:"lines_added,omitempty"`
+	LinesRemoved int            `json:"lines_removed,omitempty"`
+	// OverBuildingRuled counts the task's validate_completion calls whose
+	// over_building finding was answered or ruled on instead of fixed.
+	OverBuildingRuled int `json:"over_building_ruled,omitempty"`
 }
 
 // RunLine is one line of runs.jsonl: a run header (Header true, Task nil) or
@@ -69,6 +78,13 @@ type RunLine struct {
 	ConfiguredModels map[string]string `json:"configured_models,omitempty"`
 	PlanCall         *ToolCall         `json:"plan_call,omitempty"`
 	Task             *TaskSnapshot     `json:"task,omitempty"`
+	// Revision and TasksCarried are set on header lines. A run has one header
+	// per validate_plan round: Revision is the round's number, starting at 1,
+	// and TasksCarried is how many of the plan's tasks that round took from
+	// the round before without a reviewer call. A header with no revision
+	// decodes as 0.
+	Revision     int `json:"revision,omitempty"`
+	TasksCarried int `json:"tasks_carried,omitempty"`
 }
 
 type OutcomeFinding struct {
@@ -112,6 +128,17 @@ func NormalizeCategory(s string) string {
 		return s
 	}
 	return string([]rune(s)[:40])
+}
+
+var modelDateSuffix = regexp.MustCompile(`-\d{4}-?\d{2}-?\d{2}$`)
+
+// NormalizeModel is the form a model id takes in every cohort key:
+// lower-cased, trimmed, and without one trailing date stamp, -YYYYMMDD or -YYYY-MM-DD, so a
+// dated id and its undated alias land in the same cohort. It is applied when
+// records are read, never when they are written, so records stored before it
+// existed group the same way as new ones.
+func NormalizeModel(s string) string {
+	return modelDateSuffix.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "")
 }
 
 // MaxModelRunes bounds ReviewerModel and ImplementerModel.Model: both are

@@ -37,6 +37,25 @@ Specifically:
 Severity: critical = unimplementable as written; major = implementer would
 still misimplement; minor = nit.
 
+{{if .PriorPlanFindings -}}
+## Earlier plan-level findings
+
+An earlier round of this review raised the plan-level findings below, on an
+earlier revision of this plan. The plan has been edited since. Decide for each
+one, from the plan text above, whether it still holds:
+
+- If the edit resolved it, do not raise it again, and do not replace it with a
+  reworded version of the same concern.
+- If it still holds, raise it again with the same `category` and `criterion`,
+  so the controller can see it is the same finding.
+
+Beyond this list, raise a new plan-level finding only if it is critical or
+major, or one the sections below require. Do not go looking for new minor
+findings: the earlier round reviewed this plan and did not raise them.
+
+{{range .PriorPlanFindings}}- [{{.Severity}}][{{.Category}}] {{oneLine .Criterion}} — {{oneLine .Evidence}}
+{{end}}
+{{end -}}
 **plan_quality** — emit one of `"rough"`, `"actionable"`, or `"rigorous"`:
 
 - `rough`: implementer cannot start; spec is missing critical pieces, or contradictions block coherent dispatch.

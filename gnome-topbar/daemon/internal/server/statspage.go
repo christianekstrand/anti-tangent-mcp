@@ -108,7 +108,7 @@ func renderStatsPage(at atstats.Stats) string {
 		}))
 		b.WriteString(histTable(3, "CodeScene categories", cs.CategoryHistogram))
 	} else {
-		b.WriteString(`<p class="muted">No data yet. Append <code>analyze_change_set</code> records to <code>codescene-events.jsonl</code>; see <code>docs/team-setup/codescene-stats.md</code>.</p>`)
+		b.WriteString(`<p class="muted">No data yet. The anti-tangent server records a CodeScene run when <code>validate_completion</code> is given the <code>codescene</code> argument; see <code>docs/team-setup/codescene-stats.md</code>.</p>`)
 	}
 	if at.Summary != "" {
 		// .snippet preserves newlines (white-space:pre-wrap) so the multi-line

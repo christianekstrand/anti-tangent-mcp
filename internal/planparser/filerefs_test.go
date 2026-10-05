@@ -220,3 +220,20 @@ func TestFileRefs_VerbsApplyToEveryPath(t *testing.T) {
 	assert.Equal(t, []string{"a.go", "b.go"}, refs.Create)
 	assert.Equal(t, []string{"a.go", "b.go"}, refs.Modify)
 }
+
+func TestListedPaths_EveryLabelledBulletOfTheFilesSection(t *testing.T) {
+	body := "### Task 1: x\n\n**Goal:** g\n\n**Files:**\n" +
+		"- Create: `pkg/new.go`\n" +
+		"- Modify: `pkg/old.go:10-20`, `pkg/other.go`\n" +
+		"- Test: `pkg/new_test.go`\n" +
+		"* Test (create): `pkg/old_test.go`\n" +
+		"- Modify: `pkg/new.go`\n" +
+		"- no label here\n" +
+		"\n**Steps:**\n- Create: `pkg/not_listed.go`\n"
+	assert.Equal(t,
+		[]string{"pkg/new.go", "pkg/old.go", "pkg/other.go", "pkg/new_test.go", "pkg/old_test.go"},
+		ListedPaths(body))
+	assert.Nil(t, ListedPaths("**Files:**\n- `pkg/unlabelled.go`\n- no label here\n"),
+		"a bullet with no `label:` contributes nothing, even when it names a path")
+	assert.Nil(t, ListedPaths("### Task 2: y\n\n**Goal:** g\n"), "no Files section lists nothing")
+}

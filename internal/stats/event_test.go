@@ -127,3 +127,15 @@ func TestCountFindings_OverBuildingIsCounted(t *testing.T) {
 	require.Equal(t, 2, total)
 	assert.Equal(t, 2, crit["over_building"])
 }
+
+func TestCountFindings_PlanRunIDAdvisoryIsCounted(t *testing.T) {
+	findings := []verdict.Finding{
+		{Severity: verdict.SeverityMinor, Category: verdict.CategoryOther,
+			Criterion: "plan_run_id", Evidence: "e", Suggestion: "s"},
+		{Severity: verdict.SeverityMinor, Category: verdict.CategoryOther,
+			Criterion: " Plan_Run_ID ", Evidence: "e", Suggestion: "s"},
+	}
+	_, _, crit, total := CountFindings(findings)
+	require.Equal(t, 2, total)
+	assert.Equal(t, 2, crit["plan_run_id"])
+}

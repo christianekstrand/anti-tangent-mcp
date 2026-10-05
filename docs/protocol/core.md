@@ -14,7 +14,7 @@ This document has three audiences:
 
 - **Plan authors** — a task format that maps directly to `validate_task_spec` inputs (one-time read while drafting).
 - **Controllers** (orchestrators dispatching implementers — superpowers' `subagent-driven-development`, hone-ai's equivalent, or a hand-rolled loop) — a **required plan-handoff gate** plus a paste-in dispatch clause per subagent prompt.
-- **Implementing subagents** — a paste-in lifecycle clause mandating pre + post calls, treating mid calls as optional (call only when you suspect drift), and how to handle findings.
+- **Implementing subagents** — a paste-in lifecycle clause mandating pre + post calls, with mid calls when the guard asks or drift is suspected, and how to handle findings.
 
 The integration is **system-agnostic**: superpowers, hone-ai, vanilla Claude Code with a project-level `CLAUDE.md`, Cursor, or any MCP-capable harness. It ships as this core part plus the role parts above and the optional `project-knowledge.md`; load the ones your role needs and paste the relevant chunks where they belong.
 
@@ -37,7 +37,7 @@ The integration is **system-agnostic**: superpowers, hone-ai, vanilla Claude Cod
 
 **Pair with a codebase-aware review for any plan that lands in real code.** Text-only + codebase-aware catches both classes; either alone has a known blind spot.
 
-When the reviewer meets a plan claim it cannot verify text-only, it flags `unverifiable_codebase_claim` rather than silently passing. These are *not failures* — treat them as "things to grep before dispatching."
+A claim the reviewer cannot verify text-only is flagged `unverifiable_codebase_claim`, not passed. Task-level ones go to the `codebase_reference_checklist` field, not the findings: things to grep before dispatch, not failures.
 
 When `validate_plan`'s `context_paths` attached the relevant file, the reviewer
 verifies the claim against it instead of flagging `unverifiable_codebase_claim`. If the attached
@@ -111,9 +111,9 @@ If unsure, look for the structured task block. No block → no protocol. Don't f
 
 ## 6. FAQ / failure modes
 
-**Finding categories.** Canonical set surfaced by the reviewer (authoritative enum: `internal/verdict/verdict.go`):
+**Finding categories.** Reviewer set (authoritative enum: `internal/verdict/verdict.go`):
 
-- Spec / lifecycle: `missing_acceptance_criterion`, `scope_drift`, `ambiguous_spec`, `unaddressed_finding`, `quality`, `convention_deviation`, `attestation_contradiction`, `unverifiable_codebase_claim`, `contradicted_codebase_claim`, `other`.
+- Spec / lifecycle: `missing_acceptance_criterion`, `scope_drift`, `ambiguous_spec`, `unaddressed_finding`, `quality`, `convention_deviation`, `attestation_contradiction`, `unverifiable_codebase_claim`, `contradicted_codebase_claim`, `correctness`, `test_adequacy`, `other`.
 - Evidence: `insufficient_evidence` — emitted by `validate_completion` when an AC cannot be assessed from the submitted evidence, and by `extract_project_knowledge`. Server-only: `malformed_evidence`, `codescene_not_run`, `codescene_skipped`.
 - Operational: `session_not_found`, `payload_too_large`.
 - Project-knowledge: `kb_gap`, `ambiguous_pick`, `missing_index_entry` (prime); `redundant_proposal`, `contradicts_existing` (extract).

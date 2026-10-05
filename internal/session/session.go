@@ -97,4 +97,18 @@ type Session struct {
 	// Escalated is set once any validate_completion on the session escalates,
 	// and never cleared.
 	Escalated bool
+	// CodesceneSkipReported is set once a validate_completion on the session
+	// has returned the finding for an evidenced CodeScene skip, and never
+	// cleared. Nothing the implementer does clears that finding, so it is
+	// returned once.
+	CodesceneSkipReported bool
+	// CodesceneEventKey identifies the CodeScene run most recently written to
+	// the stats event file for this session, so a call that sends the same
+	// result again does not record the run a second time.
+	CodesceneEventKey string
+	// OverBuildingAnswered is set once a validate_completion on the session
+	// carried a finding_responses answer to an over_building finding, and
+	// never cleared: an answer is sent once, and must still stand on the
+	// calls after it.
+	OverBuildingAnswered bool
 }

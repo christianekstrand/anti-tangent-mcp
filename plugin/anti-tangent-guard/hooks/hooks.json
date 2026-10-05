@@ -4,6 +4,10 @@
       {
         "matcher": "TaskUpdate",
         "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/check-task-complete\"" }]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/check-progress-nudge\"", "timeout": 10 }]
       }
     ],
     "PreToolUse": [

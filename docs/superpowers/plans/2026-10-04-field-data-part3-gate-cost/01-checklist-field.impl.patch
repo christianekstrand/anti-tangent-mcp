@@ -1,0 +1,388 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index bc7ed84..9d47b93 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ - An `over_building` finding raised on two consecutive `validate_completion` calls, with no `finding_responses` entry answering it and no controller ruling covering it, gains a companion `major` `unaddressed_finding` with `criterion: over_building`, which moves the verdict and tells the implementer to cut the structure or answer the finding with the reason it stays. With an answer the finding stays `minor`, on that call and on the session's later ones. Structure an acceptance criterion itself mandated is reported in a finding of its own, `criterion: over_building_mandated`, addressed to the plan author: it draws no companion, and `events.jsonl` counts it separately.
+ - `anti-tangent-guard`'s comment scan covers `.mjs` and `.vue` (JavaScript rules) and `.kts` (Kotlin rules). The `<!-- -->` comments of a `.vue` template block are not recognised.
+ - The implementer protocol no longer calls `check_progress` optional and low-signal: the dispatch clause says to call it when the guard asks, or when drift is suspected.
++- `codebase_reference_checklist` is a field of the `validate_task_spec` envelope and of the `validate_plan` response, no longer a finding. `validate_task_spec` returns one entry per claim the reviewer could not verify; `validate_plan` one entry per affected task. It does not count as a finding, as a minor on the verdict ladder, or toward `noise_cluster`, so three unverifiable references no longer lift a clean spec to `warn`. The summary block prints it under `checklist:`, `next_action` names it, and `events.jsonl` records its length as `checklist_items`. A caller that read the checklist from `findings` / `plan_findings` by its `codebase_reference_checklist` criterion must read the new field.
+ 
+ ## [0.26.0] - 2026-09-24
+ 
+diff --git a/README.md b/README.md
+index f6d8e35..01597b9 100644
+--- a/README.md
++++ b/README.md
+@@ -315,7 +315,7 @@ All six tools accept an optional `max_tokens_override` non-negative int — repl
+ 
+ `validate_plan` scales its default output budget by task count when no `max_tokens_override` is supplied. If reviewer output still truncates before any usable analysis, the response is a `warn` with a `major` truncation finding and retry guidance naming `max_tokens_override`, `ANTI_TANGENT_PLAN_MAX_TOKENS`, and `ANTI_TANGENT_MAX_TOKENS_CEILING`.
+ 
+-Task-level `unverifiable_codebase_claim` findings are rolled into one plan-level checklist. If that checklist is the only remaining finding category, `plan_verdict` is `pass` and `plan_quality` lands at `actionable` (or stays at `rigorous` when the reviewer already emitted that); callers should still pre-flight the references before dispatch.
++Task-level `unverifiable_codebase_claim` findings leave the findings and are returned in the response's `codebase_reference_checklist` field, one entry per affected task (v0.27.0+; earlier versions appended them as one plan-level finding). The checklist is a list of references to pre-flight, not a finding: it does not count toward the verdict or toward `noise_cluster`, and no ruling is needed for it. If those claims are all the reviewer raised, `plan_verdict` is `pass` and `plan_quality` lands at `actionable` (or stays at `rigorous` when the reviewer already emitted that); callers should still pre-flight the references before dispatch.
+ 
+ As of v0.4.0, `validate_plan` task results may include `lightweight_eligible` and `lightweight_reason`. These are advisory controller hints for trivial mechanical tasks that may use the lightweight protocol; they do not change the server-side lifecycle hooks.
+ 
+@@ -332,7 +332,7 @@ In addition to the existing `task_title` / `goal` / `acceptance_criteria` / `non
+ - `phase` (optional, v0.3.3+): `pre` (default) or `post`. Use `post` only for post-hoc/session-recovery reviews; normal protocol still calls this at task start.
+ - `context_paths` (optional, v0.25.0+): absolute paths to files the implementer was told to work from, such as its dispatch brief. The server reads them and shows the reviewer their contents, so a term or step they define is not reported as missing from the spec.
+ 
+-`validate_task_spec` rolls task-level `unverifiable_codebase_claim` findings into a single `codebase_reference_checklist` finding so implementers get one consistent checklist shape instead of raw text-only-reference findings.
++`validate_task_spec` takes `unverifiable_codebase_claim` findings out of `findings` and returns them in the envelope's `codebase_reference_checklist` field, one entry per claim (v0.27.0+; earlier versions returned them as one minor finding). The checklist does not count as a finding, as a minor on the verdict ladder, or toward `noise_cluster`; `events.jsonl` records its length as `checklist_items`.
+ 
+ ### `validate_completion` arguments
+ 
+diff --git a/docs/protocol/core.md b/docs/protocol/core.md
+index 5113f47..d0439d0 100644
+--- a/docs/protocol/core.md
++++ b/docs/protocol/core.md
+@@ -37,7 +37,7 @@ The integration is **system-agnostic**: superpowers, hone-ai, vanilla Claude Cod
+ 
+ **Pair with a codebase-aware review for any plan that lands in real code.** Text-only + codebase-aware catches both classes; either alone has a known blind spot.
+ 
+-When the reviewer meets a plan claim it cannot verify text-only, it flags `unverifiable_codebase_claim` rather than silently passing. These are *not failures* — treat them as "things to grep before dispatching."
++A claim the reviewer cannot verify text-only is flagged `unverifiable_codebase_claim`, not passed. Task-level ones go to the `codebase_reference_checklist` field, not the findings: things to grep before dispatch, not failures.
+ 
+ When `validate_plan`'s `context_paths` attached the relevant file, the reviewer
+ verifies the claim against it instead of flagging `unverifiable_codebase_claim`. If the attached
+diff --git a/internal/mcpsrv/handlers.go b/internal/mcpsrv/handlers.go
+index 3ba3768..b160dcc 100644
+--- a/internal/mcpsrv/handlers.go
++++ b/internal/mcpsrv/handlers.go
+@@ -78,6 +78,11 @@ type Envelope struct {
+ 	// it, because only implementers call that tool; it is not part of the
+ 	// summary block, which is what gets pasted into DONE reports.
+ 	ImplementationGuidance string `json:"implementation_guidance,omitempty"`
++	// CodebaseReferenceChecklist lists the codebase references a
++	// validate_task_spec review could not verify from the spec text, one per
++	// entry. It is a to-do list for the controller, not a list of findings: it
++	// does not count toward Verdict.
++	CodebaseReferenceChecklist []string `json:"codebase_reference_checklist,omitempty"`
+ }
+ 
+ // ValidateTaskSpecArgs is the input schema for the pre-hook.
+@@ -187,18 +192,20 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
+ 	result := out.Result
+ 	result.Findings = suppressTestabilityExtractionScopeDrift(result.Findings, inputs.TestabilityExtractions)
+ 	result.Findings = suppressUnverifiableCodebaseClaim(result.Findings, inputs.ControllerVerifiedReferences)
+-	result.Findings = normalizeTaskSpecUnverifiableFindings(result.Findings)
++	var checklist []string
++	result.Findings, checklist = splitTaskSpecChecklist(result.Findings)
+ 	result.Findings = withServerFindings(cc.Clamp, result.Findings, out.Server)
+ 	result = verdict.FinalizeVerdict(result)
+ 
+ 	env := Envelope{
+-		Tool:       "validate_task_spec",
+-		Verdict:    string(result.Verdict),
+-		Findings:   result.Findings,
+-		NextAction: result.NextAction,
+-		ModelUsed:  out.ModelUsed,
+-		ReviewMS:   out.ReviewMS,
+-		Partial:    result.Partial,
++		Tool:                       "validate_task_spec",
++		Verdict:                    string(result.Verdict),
++		Findings:                   result.Findings,
++		NextAction:                 result.NextAction,
++		ModelUsed:                  out.ModelUsed,
++		ReviewMS:                   out.ReviewMS,
++		Partial:                    result.Partial,
++		CodebaseReferenceChecklist: checklist,
+ 	}
+ 
+ 	guidance, err := prompts.LeanGuidance()
+@@ -207,6 +214,9 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
+ 	}
+ 	env.ImplementationGuidance = guidance
+ 	env.NextAction = strings.TrimRight(env.NextAction, " \t\r\n") + " Read `implementation_guidance` before writing code."
++	if len(checklist) > 0 {
++		env.NextAction += taskSpecChecklistNextAction
++	}
+ 
+ 	if f, ok := h.taskSpecPlanRunAdvisory(args.PlanRunID, args.TaskIndex); ok {
+ 		env.Findings = append(env.Findings, f)
+@@ -254,6 +264,8 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
+ 		reviewMS:  env.ReviewMS,
+ 		partial:   env.Partial,
+ 		sessionID: env.SessionID,
++
++		checklistItems: len(env.CodebaseReferenceChecklist),
+ 	})
+ 	return envelopeResult(env)
+ }
+@@ -362,6 +374,9 @@ type statParams struct {
+ 
+ 	tasksTotal      int
+ 	tasksWithHeader int
++	// checklistItems is how many codebase_reference_checklist entries the
++	// call returned.
++	checklistItems int
+ }
+ 
+ // recordStat maps a statParams into a stats.Event and records it.
+@@ -388,6 +403,7 @@ func (h *handlers) recordStat(p statParams) {
+ 		SessionHash:     h.deps.Stats.HashSession(p.sessionID),
+ 		TasksTotal:      p.tasksTotal,
+ 		TasksWithHeader: p.tasksWithHeader,
++		ChecklistItems:  p.checklistItems,
+ 	})
+ }
+ 
+@@ -2415,9 +2431,9 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
+ 		// produces — so the entry really can be shared between the two.
+ 		//
+ 		// finish() ONLY — no applyPreLadder, and above all no verdict ladder:
+-		// the entry was finalized before it was stored, with its checklist
+-		// already appended, so re-running the ladder on a cached entry would
+-		// count that checklist toward noise_cluster. See
++		// the entry was finalized before it was stored, with its unverifiable
++		// claims already moved to the checklist, so re-running the ladder on a
++		// cached entry would empty that checklist. See
+ 		// planCallContext for the three call orders and for the two
+ 		// divergences (no checkFileConsistency, no store) this path keeps on
+ 		// purpose.
+@@ -2439,13 +2455,14 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
+ 		// The cache key uses the configured model ref. cachedModelUsed is the
+ 		// provider-reported model from the original review being reused.
+ 		h.recordStat(statParams{
+-			tool:      "validate_plan",
+-			verdict:   string(cached.PlanVerdict),
+-			findings:  planFindings(cached),
+-			modelUsed: cachedModelUsed,
+-			reviewMS:  0,
+-			partial:   cached.Partial,
+-			cached:    true,
++			tool:           "validate_plan",
++			verdict:        string(cached.PlanVerdict),
++			findings:       planFindings(cached),
++			modelUsed:      cachedModelUsed,
++			reviewMS:       0,
++			partial:        cached.Partial,
++			cached:         true,
++			checklistItems: len(cached.CodebaseReferenceChecklist),
+ 			// contextBytes, NOT contextPayloadBytes: a cache hit makes no
+ 			// reviewer call at all, so it sends the attached set zero times.
+ 			// Multiplying by reviewerCalls() here billed a 3-call chunked
+@@ -2522,6 +2539,7 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
+ 				payloadBytes:    planBytes + pkBytes + contextPayloadBytes,
+ 				tasksTotal:      tasksTotal,
+ 				tasksWithHeader: tasksWithHeader,
++				checklistItems:  len(p.CodebaseReferenceChecklist),
+ 			})
+ 			logOutcome, logVerdict = "truncated", p.PlanVerdict
+ 		} else {
+@@ -2563,6 +2581,7 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
+ 		payloadBytes:    planBytes + pkBytes + contextPayloadBytes,
+ 		tasksTotal:      tasksTotal,
+ 		tasksWithHeader: tasksWithHeader,
++		checklistItems:  len(pr.CodebaseReferenceChecklist),
+ 	})
+ 	logVerdict = pr.PlanVerdict
+ 	return planEnvelopeResultFinalized(pr, meta)
+@@ -2896,13 +2915,16 @@ func planEnvelopeResult(pr verdict.PlanResult, meta planSummaryMeta, tasks []pla
+ //     stripped;
+ //  3. FinalizePlanVerdict (per-task and plan-level severity ladder,
+ //     noise_cluster, ApplyPlanQualitySanity);
+-//  4. append the rolled-up checklist, after the ladder, so it never counts
+-//     toward noise_cluster.
++//  4. set the checklist field from the stripped lines. It is not a finding,
++//     so the ladder never sees it.
++//
++// It must run once per result: a second run finds nothing left to strip and
++// would replace the checklist with an empty one.
+ func finalizePlanVerdict(pr *verdict.PlanResult, tasks []planparser.RawTask) {
+ 	lines := stripTaskUnverifiableFindings(pr, tasks)
+ 	calibratePlanVerdictForUnverifiableOnly(pr, len(lines) > 0)
+ 	verdict.FinalizePlanVerdict(pr)
+-	appendCodebaseReferenceChecklist(pr, lines)
++	pr.CodebaseReferenceChecklist = lines
+ }
+ 
+ func finalizePlanResult(pr verdict.PlanResult, meta planSummaryMeta, tasks []planparser.RawTask) verdict.PlanResult {
+diff --git a/internal/mcpsrv/plan_normalize.go b/internal/mcpsrv/plan_normalize.go
+index 5228ab0..b348d6d 100644
+--- a/internal/mcpsrv/plan_normalize.go
++++ b/internal/mcpsrv/plan_normalize.go
+@@ -68,32 +68,14 @@ func stripTaskUnverifiableFindings(pr *verdict.PlanResult, tasks []planparser.Ra
+ 	return lines
+ }
+ 
+-// appendCodebaseReferenceChecklist appends the rolled-up checklist finding
+-// built from lines, when there are any. It runs after the verdict ladder: a
+-// list of references to pre-flight is not a plan defect, and counting it
+-// toward the three-minor noise_cluster rule would lift an otherwise passing
+-// plan to warn. It is added after the waivers ran, so no ruling waives it.
+-func appendCodebaseReferenceChecklist(pr *verdict.PlanResult, lines []string) {
+-	if len(lines) == 0 {
+-		return
+-	}
+-	pr.PlanFindings = append(pr.PlanFindings, verdict.Finding{
+-		Severity:   verdict.SeverityMinor,
+-		Category:   verdict.CategoryUnverifiableCodebaseClaim,
+-		Criterion:  "codebase_reference_checklist",
+-		Evidence:   strings.Join(lines, "\n"),
+-		Suggestion: "Pre-flight these references with grep or codebase-aware review before dispatch. Do not treat this checklist as a plan-quality defect if the references were already verified.",
+-	})
+-}
+-
+ // calibratePlanVerdictForUnverifiableOnly treats a plan whose only findings
+ // are minor unverifiable_codebase_claim entries as a checklist rather than a
+ // blocker: plan_quality rises to at least actionable, unless the reviewer said
+ // rigorous, and next_action says so. The checklist is a list of references to
+ // pre-flight before dispatch, not work the plan owes. stripped reports whether
+ // task-level unverifiable findings were removed for the checklist, which counts
+-// as one such finding although it is appended only after the ladder. The ladder
+-// that runs next derives the verdict from the findings either way.
++// as one such finding although the checklist is not among the findings. The
++// ladder that runs next derives the verdict from the findings either way.
+ func calibratePlanVerdictForUnverifiableOnly(pr *verdict.PlanResult, stripped bool) {
+ 	if !allPlanFindingsAreMinorUnverifiable(*pr, stripped) {
+ 		return
+@@ -104,7 +86,7 @@ func calibratePlanVerdictForUnverifiableOnly(pr *verdict.PlanResult, stripped bo
+ 	}
+ 	pr.NextAction = "Plan passes: dispatch."
+ 	if stripped {
+-		pr.NextAction += " The codebase_reference_checklist finding lists references the " +
++		pr.NextAction += " `codebase_reference_checklist` lists references the " +
+ 			"reviewer could not verify: pre-flight any you have not already checked, or list them in " +
+ 			"controller_verified_references on the next call."
+ 		return
+diff --git a/internal/mcpsrv/review_error.go b/internal/mcpsrv/review_error.go
+index 430e314..5fa4eee 100644
+--- a/internal/mcpsrv/review_error.go
++++ b/internal/mcpsrv/review_error.go
+@@ -94,8 +94,8 @@ func (h *handlers) resolveModelAndRender(
+ //
+ // The verdict ladder (finalizePlanVerdict) is deliberately NOT a method
+ // here. The cache-hit path must never re-run it on an already-finalized
+-// entry — its checklist is already appended, and a second ladder would count
+-// it toward noise_cluster — so the ladder stays at the call sites, which is
++// entry — its unverifiable claims are already moved to the checklist, and a
++// second ladder would empty it — so the ladder stays at the call sites, which is
+ // exactly where the three orders differ:
+ //
+ //	fresh review = applyPreLadder -> ladder -> mintPlanRunID -> store -> finish
+diff --git a/internal/mcpsrv/summary.go b/internal/mcpsrv/summary.go
+index ccb71f9..7d32f60 100644
+--- a/internal/mcpsrv/summary.go
++++ b/internal/mcpsrv/summary.go
+@@ -62,6 +62,7 @@ func formatEnvelopeSummary(env Envelope) string {
+ 	writeFindingsSummary(&b, env.Findings, "  ")
+ 	writeRulingsSummary(&b, env.ControllerRulings, "  ")
+ 	writeWaivedSummary(&b, env.WaivedFindings, "  ")
++	writeChecklistSummary(&b, env.CodebaseReferenceChecklist)
+ 	// next_action is reviewer-authored free text (schema: minLength 1, no
+ 	// other constraint — see internal/verdict/schema.json) rendered LAST in
+ 	// this block, after every finding. Escaping it matters for the same
+@@ -168,6 +169,7 @@ func formatPlanSummary(pr verdict.PlanResult, meta planSummaryMeta) string {
+ 		}
+ 		writeWaivedSummary(&b, t.WaivedFindings, "      ")
+ 	}
++	writeChecklistSummary(&b, pr.CodebaseReferenceChecklist)
+ 	fmt.Fprintf(&b, "  next_action:   %s\n", escapeBlockValue(pr.NextAction))
+ 	return b.String()
+ }
+@@ -266,6 +268,19 @@ func writeWaivedSummary(b *strings.Builder, waived []verdict.WaivedFinding, inde
+ 	}
+ }
+ 
++// writeChecklistSummary writes the codebase_reference_checklist: a count line
++// and one bullet per entry, or nothing when the checklist is empty. Entries
++// quote reviewer text, so each is truncated and escaped like finding evidence.
++func writeChecklistSummary(b *strings.Builder, checklist []string) {
++	if len(checklist) == 0 {
++		return
++	}
++	fmt.Fprintf(b, "  checklist:     %d unverified codebase reference(s), not findings\n", len(checklist))
++	for _, entry := range checklist {
++		fmt.Fprintf(b, "    - %s\n", formatFindingEvidence(entry, "      "))
++	}
++}
++
+ // writeFindingsSummary writes the `findings: N total (C critical, M major, m minor)`
+ // summary line and one bullet per finding to b, prefixed with the supplied
+ // indent. Shared by formatEnvelopeSummary so the layout stays identical.
+diff --git a/internal/mcpsrv/task_spec_normalize.go b/internal/mcpsrv/task_spec_normalize.go
+index 6c1808c..b01e3f3 100644
+--- a/internal/mcpsrv/task_spec_normalize.go
++++ b/internal/mcpsrv/task_spec_normalize.go
+@@ -6,19 +6,24 @@ import (
+ 	"github.com/patiently/anti-tangent-mcp/internal/verdict"
+ )
+ 
+-func normalizeTaskSpecUnverifiableFindings(findings []verdict.Finding) []verdict.Finding {
++// taskSpecChecklistNextAction is appended to validate_task_spec's next_action
++// when the envelope carries a codebase_reference_checklist.
++const taskSpecChecklistNextAction = " `codebase_reference_checklist` lists references the reviewer could not verify: " +
++	"pre-flight any that were not already checked. It is a to-do list, not a defect in the spec."
++
++// splitTaskSpecChecklist takes every unverifiable_codebase_claim out of a
++// validate_task_spec review's findings. The claims are references for the
++// controller to pre-flight, not defects in the spec, so they are returned as
++// the envelope's checklist, one entry per claim, and never reach the verdict
++// ladder.
++func splitTaskSpecChecklist(findings []verdict.Finding) (kept []verdict.Finding, checklist []string) {
+ 	kept, evidence := splitTaskUnverifiable(findings)
+-	if len(evidence) == 0 {
+-		return kept
++	for _, e := range evidence {
++		if e = strings.TrimSpace(e); e != "" {
++			checklist = append(checklist, truncate(e, rollupEvidencePerTaskMax))
++		}
+ 	}
+-
+-	return append(kept, verdict.Finding{
+-		Severity:   verdict.SeverityMinor,
+-		Category:   verdict.CategoryUnverifiableCodebaseClaim,
+-		Criterion:  "codebase_reference_checklist",
+-		Evidence:   truncate(strings.Join(evidence, "; "), rollupEvidencePerTaskMax),
+-		Suggestion: "Pre-flight these references with grep or codebase-aware review before implementation. If they were already verified, treat this as a checklist rather than a spec-quality defect.",
+-	})
++	return kept, checklist
+ }
+ 
+ // suppressUnverifiableCodebaseClaim drops any unverifiable_codebase_claim
+diff --git a/internal/stats/event.go b/internal/stats/event.go
+index 60fba48..e564b12 100644
+--- a/internal/stats/event.go
++++ b/internal/stats/event.go
+@@ -38,6 +38,11 @@ type Event struct {
+ 	TasksTotal      int `json:"tasks_total,omitempty"`
+ 	TasksWithHeader int `json:"tasks_with_header,omitempty"`
+ 
++	// ChecklistItems is how many codebase_reference_checklist entries a
++	// validate_task_spec or validate_plan call returned. The checklist is not
++	// a finding, so no other field counts it.
++	ChecklistItems int `json:"checklist_items,omitempty"`
++
+ 	// InputTokens / OutputTokens are set only by the I/O-delegation tools
+ 	// (bulk_read, code_write). They are what makes "tokens kept out of the
+ 	// implementer's context" computable. omitempty so no existing event shape
+diff --git a/internal/verdict/plan.go b/internal/verdict/plan.go
+index 5260be3..d988a63 100644
+--- a/internal/verdict/plan.go
++++ b/internal/verdict/plan.go
+@@ -65,6 +65,11 @@ type PlanResult struct {
+ 	// WaivedFindings holds the plan-level findings a controller ruling
+ 	// covered. Server-set, like PlanRunID.
+ 	WaivedFindings []WaivedFinding `json:"waived_findings,omitempty"`
++	// CodebaseReferenceChecklist lists, one entry per affected task, the
++	// codebase references the reviewer could not verify. Server-set. It is a
++	// to-do list for the controller, not a list of findings, and does not
++	// count toward PlanVerdict.
++	CodebaseReferenceChecklist []string `json:"codebase_reference_checklist,omitempty"`
+ }
+ 
+ // PlanTaskResult is the per-task analysis carried inside PlanResult.Tasks.
+diff --git a/plugin/anti-tangent-protocol/protocol/core.md b/plugin/anti-tangent-protocol/protocol/core.md
+index 5113f47..d0439d0 100644
+--- a/plugin/anti-tangent-protocol/protocol/core.md
++++ b/plugin/anti-tangent-protocol/protocol/core.md
+@@ -37,7 +37,7 @@ The integration is **system-agnostic**: superpowers, hone-ai, vanilla Claude Cod
+ 
+ **Pair with a codebase-aware review for any plan that lands in real code.** Text-only + codebase-aware catches both classes; either alone has a known blind spot.
+ 
+-When the reviewer meets a plan claim it cannot verify text-only, it flags `unverifiable_codebase_claim` rather than silently passing. These are *not failures* — treat them as "things to grep before dispatching."
++A claim the reviewer cannot verify text-only is flagged `unverifiable_codebase_claim`, not passed. Task-level ones go to the `codebase_reference_checklist` field, not the findings: things to grep before dispatch, not failures.
+ 
+ When `validate_plan`'s `context_paths` attached the relevant file, the reviewer
+ verifies the claim against it instead of flagging `unverifiable_codebase_claim`. If the attached

@@ -12,8 +12,9 @@ import (
 // would silently break that consumer, so every field is tagged.
 // Changing/dropping a key is a breaking change.
 //
-// The Codescene field is populated when the agent appends CodeScene per-run
-// records to codescene-events.jsonl.
+// The Codescene field is set when codescene-events.jsonl holds records in the
+// window: the server appends one per CodeScene run a validate_completion call
+// reports.
 type Rollup struct {
 	WindowStart       time.Time      `json:"window_start"`
 	WindowEnd         time.Time      `json:"window_end"`

@@ -222,3 +222,31 @@ func TestContradictedCodebaseClaim_InPlanSchemasOnly(t *testing.T) {
 			"the category is validate_plan-only; context_paths exists on no other tool")
 	}
 }
+
+func TestParse_CorrectnessAndTestAdequacy_AcceptedAndNotFloored(t *testing.T) {
+	for _, cat := range []Category{CategoryCorrectness, CategoryTestAdequacy} {
+		raw := []byte(`{
+			"verdict":"warn",
+			"findings":[{
+				"severity":"major",
+				"category":"` + string(cat) + `",
+				"criterion":"returns 404 for an unknown id",
+				"evidence":"handler.go:12 ignores the lookup error",
+				"suggestion":"return the error to the caller",
+				"same_as":null
+			}],
+			"next_action":"fix the defect"
+		}`)
+		r, err := Parse(raw)
+		require.NoError(t, err, "%s must be a valid category", cat)
+		require.Len(t, r.Findings, 1)
+		require.Equal(t, cat, r.Findings[0].Category)
+		require.Equal(t, SeverityMajor, r.Findings[0].Severity, "%s must not be floored to minor", cat)
+	}
+}
+
+func TestSchema_ListsCorrectnessCategories(t *testing.T) {
+	s := string(Schema())
+	require.Contains(t, s, `"correctness"`)
+	require.Contains(t, s, `"test_adequacy"`)
+}

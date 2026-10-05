@@ -11,7 +11,7 @@ format it should have had is in [`authoring.md`](authoring.md).
 | Phase | Tool | Required? | When to call |
 |---|---|---|---|
 | Start | `validate_task_spec` | **Yes** | Once, before writing any code |
-| During | `check_progress` | Optional (advisory; low-signal in field data) | When you suspect drift, a test that 'should' fail doesn't, or you've spent >5 min on behavior the spec leaves under-specified |
+| During | `check_progress` | When asked | When the guard asks, or when you suspect drift: a test that 'should' fail doesn't, or >5 min spent on behavior the spec leaves under-specified |
 | End | `validate_completion` | **Yes** | Before reporting DONE |
 
 One task = one session = one subagent. The `session_id` from `validate_task_spec` lives in the implementer's context for the task's lifetime.
@@ -22,7 +22,8 @@ One task = one session = one subagent. The `session_id` from `validate_task_spec
 ## Drift-protection protocol (anti-tangent-mcp)
 
 At task start and before DONE, you must use `validate_task_spec` and
-`validate_completion`. Use `check_progress` only when you suspect drift.
+`validate_completion`. Use `check_progress` when the guard asks, or when
+you suspect drift.
 
 **1. At the start (REQUIRED).** Before writing any code, call
 `validate_task_spec` with the structured task fields below. Save the
@@ -38,10 +39,9 @@ returned `session_id` — you'll thread it through subsequent calls.
   re-validating again — fix it, or accept it with the one-sentence
   mitigation below and proceed on that basis.
 
-**2. During work (OPTIONAL).** Call `check_progress` ONLY if you suspect
-you're drifting mid-task, OR a test that 'should' fail doesn't, OR
-you've spent >5 min debugging behavior the spec leaves under-specified.
-This call is advisory — most tasks skip it. When you do call, pass: the
+**2. During work.** Call `check_progress` when the guard asks, or when
+you suspect drift: a test that 'should' fail doesn't, or you've spent
+>5 min debugging behavior the spec leaves under-specified. Pass: the
 session_id, a one-sentence `working_on` summary, and the changed files.
 
 **2b. CodeScene mid-task check (REQUIRED when codescene-mcp is

@@ -22,7 +22,7 @@ not on disk; it is deprecated and will be removed in 1.0.0.
 1. Call `validate_plan`, passing `plan_path` when the plan is on disk, otherwise `plan_text`. Capture the `PlanResult`.
 2. **Surface results to the user.** Show `plan_verdict`, plan-level findings, and per-task verdicts/findings. For any task whose `suggested_header_block` is non-empty, show the proposed header and ask the human to adopt or revise. If task results include `lightweight_eligible` / `lightweight_reason`, treat them as advisory hints.
 3. **Apply the proposed header blocks** (apply automatically when verdicts are `pass`/`warn` and the human approves; defer to the human for `fail`).
-4. If anything material changed, call `validate_plan` again. Repeat until `plan_verdict: "pass"` (or every `warn` is explicitly justified). Each round, pass `controller_verified_references` for references you grepped and `controller_rulings` (§5.9) for findings you decided.
+4. If anything material changed, call `validate_plan` again with the last round's `plan_run_id`: only changed tasks are re-reviewed, the rest carry, the id stays. Repeat until `plan_verdict: "pass"` (or every `warn` is explicitly justified). Each round, pass `controller_verified_references` for references you grepped and `controller_rulings` (§5.9) for findings you decided.
 5. **Only proceed to dispatch when the plan-level gate passes.**
 6. **Capture `plan_run_id`** from the final passing `validate_plan` call and add it, with the
    task's 1-based `task_index`, to the dispatch clause: implementers pass both to

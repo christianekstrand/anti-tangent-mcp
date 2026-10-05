@@ -32,33 +32,38 @@ func wilson(num, n int) Rate {
 }
 
 type Metrics struct {
-	Source               string         `json:"source"`
-	Runs                 int            `json:"runs"`
-	Tasks                int            `json:"tasks"`
-	EscapeRate           Rate           `json:"escape_rate"`
-	MinorEscapeRate      Rate           `json:"minor_escape_rate"`
-	UnconfirmedFlagRate  Rate           `json:"unconfirmed_flag_rate"`
-	WaiveRate            Rate           `json:"waive_rate"`
-	CaughtAndFixed       int            `json:"caught_and_fixed"`
-	UnattributedFindings map[string]int `json:"unattributed_findings,omitempty"`
-	CallsPerTask         float64        `json:"calls_per_task"`
-	ReviewMSP50          int64          `json:"review_ms_p50"`
-	ReviewMSP95          int64          `json:"review_ms_p95"`
+	Source                string         `json:"source"`
+	Runs                  int            `json:"runs"`
+	Tasks                 int            `json:"tasks"`
+	EscapeRate            Rate           `json:"escape_rate"`
+	MinorEscapeRate       Rate           `json:"minor_escape_rate"`
+	UnconfirmedFlagRate   Rate           `json:"unconfirmed_flag_rate"`
+	WaiveRate             Rate           `json:"waive_rate"`
+	CaughtAndFixed        int            `json:"caught_and_fixed"`
+	CorrectnessEscapeRate Rate           `json:"correctness_escape_rate"`
+	CorrectnessFlagRecall Rate           `json:"correctness_flag_recall"`
+	UnattributedFindings  map[string]int `json:"unattributed_findings,omitempty"`
+	CallsPerTask          float64        `json:"calls_per_task"`
+	ReviewMSP50           int64          `json:"review_ms_p50"`
+	ReviewMSP95           int64          `json:"review_ms_p95"`
+	LinesAddedP50         int64          `json:"lines_added_p50,omitempty"`
 }
 
 // acc accumulates one group's scored tasks.
 type acc struct {
-	source                string
-	runs                  map[runKey]bool
-	tasks                 int
-	passN, escNum, minNum int
-	flagN, unconfNum      int
-	waived, atFindings    int
-	caught                int
-	unattr                map[string]int
-	calls                 int
-	ms                    []int64
-	first, last           time.Time
+	source                      string
+	runs                        map[runKey]bool
+	tasks                       int
+	passN, escNum, minNum       int
+	flagN, unconfNum            int
+	waived, atFindings          int
+	caught                      int
+	corrEsc, corrN, corrFlagged int
+	unattr                      map[string]int
+	calls                       int
+	ms                          []int64
+	lines                       []int64
+	first, last                 time.Time
 }
 
 func newAcc(source string) *acc {
@@ -76,6 +81,18 @@ func (a *acc) addTask(r *run, t *task, o OutcomeLine) {
 	}
 	a.tasks++
 	high, minor := outcomeCounts(o, t.snap.Index)
+	if outcomeHasHigh(o, t.snap.Index, correctnessCategory) {
+		a.corrN++
+		if t.snap.Categories[correctnessCategory] > 0 {
+			a.corrFlagged++
+		}
+		if t.snap.PostVerdict == "pass" {
+			a.corrEsc++
+		}
+	}
+	if t.snap.LinesAdded > 0 {
+		a.lines = append(a.lines, int64(t.snap.LinesAdded))
+	}
 	if t.snap.PostVerdict == "pass" {
 		a.addPass(t, high, minor)
 	}
@@ -123,16 +140,19 @@ func (a *acc) addPass(t *task, high, minor int) {
 
 func (a *acc) metrics() Metrics {
 	m := Metrics{
-		Source:              a.source,
-		Runs:                len(a.runs),
-		Tasks:               a.tasks,
-		EscapeRate:          wilson(a.escNum, a.passN),
-		MinorEscapeRate:     wilson(a.minNum, a.passN),
-		UnconfirmedFlagRate: wilson(a.unconfNum, a.flagN),
-		WaiveRate:           wilson(a.waived, a.atFindings),
-		CaughtAndFixed:      a.caught,
-		ReviewMSP50:         percentile(a.ms, 50),
-		ReviewMSP95:         percentile(a.ms, 95),
+		Source:                a.source,
+		Runs:                  len(a.runs),
+		Tasks:                 a.tasks,
+		EscapeRate:            wilson(a.escNum, a.passN),
+		MinorEscapeRate:       wilson(a.minNum, a.passN),
+		UnconfirmedFlagRate:   wilson(a.unconfNum, a.flagN),
+		WaiveRate:             wilson(a.waived, a.atFindings),
+		CaughtAndFixed:        a.caught,
+		CorrectnessEscapeRate: wilson(a.corrEsc, a.passN),
+		CorrectnessFlagRecall: wilson(a.corrFlagged, a.corrN),
+		ReviewMSP50:           percentile(a.ms, 50),
+		ReviewMSP95:           percentile(a.ms, 95),
+		LinesAddedP50:         percentile(a.lines, 50),
 	}
 	if len(a.unattr) > 0 {
 		m.UnattributedFindings = a.unattr

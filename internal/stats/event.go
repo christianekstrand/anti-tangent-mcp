@@ -37,6 +37,15 @@ type Event struct {
 	// Goal / Acceptance criteria header. Plan-header adoption telemetry.
 	TasksTotal      int `json:"tasks_total,omitempty"`
 	TasksWithHeader int `json:"tasks_with_header,omitempty"`
+	// TasksCarried is set only on validate_plan events: how many of the plan's
+	// tasks the call answered from an earlier round's result, or from the pass
+	// cache, without sending them to the reviewer.
+	TasksCarried int `json:"tasks_carried,omitempty"`
+
+	// ChecklistItems is how many codebase_reference_checklist entries a
+	// validate_task_spec or validate_plan call returned. The checklist is not
+	// a finding, so no other field counts it.
+	ChecklistItems int `json:"checklist_items,omitempty"`
 
 	// InputTokens / OutputTokens are set only by the I/O-delegation tools
 	// (bulk_read, code_write). They are what makes "tokens kept out of the
@@ -59,6 +68,7 @@ type Event struct {
 var countedCriteria = map[string]bool{
 	"comment_hygiene":              true,
 	"over_building":                true,
+	"over_building_mandated":       true,
 	"comment_policy_absent":        true,
 	"test_evidence":                true,
 	"codescene_adoption":           true,
@@ -69,6 +79,7 @@ var countedCriteria = map[string]bool{
 	"spec":                         true,
 	"structure":                    true,
 	"max_tokens_override":          true,
+	"plan_run_id":                  true,
 }
 
 // CountFindings builds severity, category, and criterion histograms (and the total) from a

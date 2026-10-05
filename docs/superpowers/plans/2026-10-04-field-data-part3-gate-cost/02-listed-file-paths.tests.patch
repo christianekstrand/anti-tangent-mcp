@@ -1,0 +1,380 @@
+diff --git a/internal/mcpsrv/listed_file_claims_test.go b/internal/mcpsrv/listed_file_claims_test.go
+new file mode 100644
+index 0000000..a4ad9a8
+--- /dev/null
++++ b/internal/mcpsrv/listed_file_claims_test.go
+@@ -0,0 +1,154 @@
++package mcpsrv
++
++import (
++	"context"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/patiently/anti-tangent-mcp/internal/planrun"
++	"github.com/patiently/anti-tangent-mcp/internal/providers"
++	"github.com/patiently/anti-tangent-mcp/internal/verdict"
++)
++
++func TestClaimIsOnlyListedPaths(t *testing.T) {
++	files := []string{"pkg/store.go", "pkg/store_test.go", "pkg/store", "store.go"}
++	cases := []struct {
++		name  string
++		claim string
++		want  bool
++	}{
++		{"bare path", "pkg/store.go", true},
++		{"backticked path with a verb", "Modify: `pkg/store.go`", true},
++		{"path with a line anchor", "Modify: `pkg/store.go:120-145, 160`", true},
++		{"two listed paths in prose", "The task edits pkg/store.go and adds pkg/store_test.go; neither can be checked from the text.", true},
++		{"a listed directory that prefixes a listed file", "Files under pkg/store and pkg/store.go", true},
++		{"no listed path", "internal/other.go exists", false},
++		{"listed path plus a backticked symbol", "`Store.Get` in `pkg/store.go` returns an error", false},
++		{"listed path plus a bare dotted symbol", "pkg/store.go defines Store.Get", false},
++		{"listed path plus a call", "pkg/store.go has newStore()", false},
++		{"listed path plus a snake_case name", "pkg/store.go reads max_entries", false},
++		{"listed path plus a camelCase name", "pkg/store.go keeps evictOldest", false},
++		{"listed path plus an unlisted path", "pkg/store.go mirrors pkg/cache.go", false},
++		{"listed path plus an unlisted file name", "pkg/store.go mirrors cache.go", false},
++		{"a listed name inside a longer file name", "review_store.go holds the switch", false},
++		{"a listed path under another directory", "lib/pkg/store.go holds the switch", false},
++		{"a listed path with a further extension", "pkg/store.go.tmpl is the template", false},
++		{"a listed path ending a sentence", "The task edits pkg/store.go.", true},
++		{"a listed path in parentheses", "The file (pkg/store.go) cannot be checked.", true},
++		{"listed path plus a capitalised symbol", "pkg/store.go already defines Store with a mutex", false},
++		{"listed path plus two capitalised symbols", "pkg/store.go registers the Reviewer interface with Registry", false},
++		{"a capital that opens a second sentence", "pkg/store.go is listed. It cannot be checked.", true},
++		{"empty claim", "", false},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			assert.Equal(t, tc.want, claimIsOnlyListedPaths(tc.claim, files))
++		})
++	}
++	assert.False(t, claimIsOnlyListedPaths("pkg/store.go", nil), "no listed files, nothing to drop")
++}
++
++func TestDropListedFileClaims_OnlyTouchesUnverifiableClaims(t *testing.T) {
++	files := []string{"pkg/store.go"}
++	listed := verdict.Finding{Category: verdict.CategoryUnverifiableCodebaseClaim, Evidence: "Modify: `pkg/store.go`"}
++	symbol := verdict.Finding{Category: verdict.CategoryUnverifiableCodebaseClaim, Evidence: "`Store.Get` exists in pkg/store.go"}
++	other := verdict.Finding{Category: verdict.CategoryAmbiguousSpec, Evidence: "pkg/store.go"}
++
++	assert.Equal(t, []verdict.Finding{symbol, other}, dropListedFileClaims([]verdict.Finding{listed, symbol, other}, files))
++	in := []verdict.Finding{listed}
++	assert.Equal(t, in, dropListedFileClaims(in, nil))
++}
++
++const planWithFilesSections = "# Plan\n\n" +
++	"### Task 1: store\n\n**Goal:** g1\n\n**Files:**\n- Modify: `pkg/store.go:10-20`\n- Test: `pkg/store_test.go`\n\n**Acceptance criteria:**\n- ac1\n\n" +
++	"### Task 2: cache\n\n**Goal:** g2\n\n**Acceptance criteria:**\n- ac2\n\n"
++
++func TestValidatePlan_ListedFilePathsAreNotOnTheChecklist(t *testing.T) {
++	raw := []byte(`{"plan_verdict":"warn","plan_quality":"actionable","plan_findings":[],
++		"tasks":[
++			{"task_index":1,"task_title":"Task 1: store","verdict":"warn","findings":[
++				{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"Modify: ` + "`pkg/store.go:10-20`" + `","suggestion":"verify"},
++				{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"` + "`Store.Get`" + ` in pkg/store.go returns an error","suggestion":"verify"}
++			],"suggested_header_block":"","suggested_header_reason":""},
++			{"task_index":2,"task_title":"Task 2: cache","verdict":"warn","findings":[
++				{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"pkg/store.go","suggestion":"verify"}
++			],"suggested_header_block":"","suggested_header_reason":""}
++		],
++		"next_action":"n"}`)
++	d := newDepsWithScripted(t, &scriptedReviewer{responses: []providers.Response{{RawJSON: raw, Model: "claude-sonnet-4-6"}}}, 8)
++	h := &handlers{deps: d}
++
++	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: planWithFilesSections})
++	require.NoError(t, err)
++	assert.Equal(t, []string{
++		"Task 1: `Store.Get` in pkg/store.go returns an error",
++		"Task 2: pkg/store.go",
++	}, pr.CodebaseReferenceChecklist, "Task 1 lists the path; Task 2 does not, so there it is still a claim")
++}
++
++func TestValidatePlan_APlanWhoseOnlyClaimsAreListedPathsHasNoChecklist(t *testing.T) {
++	raw := []byte(`{"plan_verdict":"warn","plan_quality":"actionable","plan_findings":[],
++		"tasks":[
++			{"task_index":1,"task_title":"Task 1: store","verdict":"warn","findings":[
++				{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"pkg/store_test.go","suggestion":"verify"}
++			],"suggested_header_block":"","suggested_header_reason":""},
++			{"task_index":2,"task_title":"Task 2: cache","verdict":"pass","findings":[],"suggested_header_block":"","suggested_header_reason":""}
++		],
++		"next_action":"reviewer text"}`)
++	d := newDepsWithScripted(t, &scriptedReviewer{responses: []providers.Response{{RawJSON: raw, Model: "claude-sonnet-4-6"}}}, 8)
++	h := &handlers{deps: d}
++
++	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: planWithFilesSections})
++	require.NoError(t, err)
++	assert.Empty(t, pr.CodebaseReferenceChecklist)
++	assert.Equal(t, verdict.VerdictPass, pr.PlanVerdict)
++	assert.NotContains(t, pr.NextAction, "codebase_reference_checklist")
++}
++
++func taskSpecClaimsReviewer() *fakeReviewer {
++	return &fakeReviewer{name: "anthropic", resp: providers.Response{
++		RawJSON: []byte(`{"verdict":"pass","findings":[
++			{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"pkg/store.go","suggestion":"verify"},
++			{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"pkg/cache.go","suggestion":"verify"}
++		],"next_action":"go"}`),
++		Model: "claude-sonnet-4-6",
++	}}
++}
++
++func TestValidateTaskSpec_DropsPathsTheContextFilesSectionLists(t *testing.T) {
++	h := &handlers{deps: newDeps(t, taskSpecClaimsReviewer())}
++	_, env, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{
++		TaskTitle: "store", Goal: "g",
++		Context: "Background.\n\n**Files:**\n- Modify: `pkg/store.go`\n",
++	})
++	require.NoError(t, err)
++	assert.Equal(t, []string{"pkg/cache.go"}, env.CodebaseReferenceChecklist)
++}
++
++func TestValidateTaskSpec_DropsPathsThePlanRunListsForTheTask(t *testing.T) {
++	h := &handlers{deps: newDeps(t, taskSpecClaimsReviewer())}
++	run := h.deps.PlanRuns.CreateWithTasks("pass", "rigorous", []planrun.PlanTask{
++		{Index: 1, Title: "Task 1: store", Files: []string{"pkg/store.go"}},
++		{Index: 2, Title: "Task 2: cache", Files: []string{"pkg/cache.go"}},
++	})
++
++	_, byIndex, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{
++		TaskTitle: "anything", Goal: "g", PlanRunID: run.ID, TaskIndex: 2,
++	})
++	require.NoError(t, err)
++	assert.Equal(t, []string{"pkg/store.go"}, byIndex.CodebaseReferenceChecklist)
++
++	_, byTitle, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{
++		TaskTitle: "store", Goal: "g", PlanRunID: run.ID,
++	})
++	require.NoError(t, err)
++	assert.Equal(t, []string{"pkg/cache.go"}, byTitle.CodebaseReferenceChecklist)
++
++	_, unknown, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{
++		TaskTitle: "store", Goal: "g", PlanRunID: "pr_000000000000",
++	})
++	require.NoError(t, err)
++	assert.Len(t, unknown.CodebaseReferenceChecklist, 2, "an unknown run lists nothing, so nothing is dropped")
++}
+diff --git a/internal/planparser/filerefs_test.go b/internal/planparser/filerefs_test.go
+index c6f9620..e96c017 100644
+--- a/internal/planparser/filerefs_test.go
++++ b/internal/planparser/filerefs_test.go
+@@ -220,3 +220,18 @@ func TestFileRefs_VerbsApplyToEveryPath(t *testing.T) {
+ 	assert.Equal(t, []string{"a.go", "b.go"}, refs.Create)
+ 	assert.Equal(t, []string{"a.go", "b.go"}, refs.Modify)
+ }
++
++func TestListedPaths_EveryLabelledBulletOfTheFilesSection(t *testing.T) {
++	body := "### Task 1: x\n\n**Goal:** g\n\n**Files:**\n" +
++		"- Create: `pkg/new.go`\n" +
++		"- Modify: `pkg/old.go:10-20`, `pkg/other.go`\n" +
++		"- Test: `pkg/new_test.go`\n" +
++		"* Test (create): `pkg/old_test.go`\n" +
++		"- Modify: `pkg/new.go`\n" +
++		"- no label here\n" +
++		"\n**Steps:**\n- Create: `pkg/not_listed.go`\n"
++	assert.Equal(t,
++		[]string{"pkg/new.go", "pkg/old.go", "pkg/other.go", "pkg/new_test.go", "pkg/old_test.go"},
++		ListedPaths(body))
++	assert.Nil(t, ListedPaths("### Task 2: y\n\n**Goal:** g\n"), "no Files section lists nothing")
++}
+diff --git a/internal/planrun/planrun_test.go b/internal/planrun/planrun_test.go
+index 42f67b6..41bcad7 100644
+--- a/internal/planrun/planrun_test.go
++++ b/internal/planrun/planrun_test.go
+@@ -2,7 +2,10 @@ package planrun
+ 
+ import (
+ 	"fmt"
++	"os"
++	"path/filepath"
+ 	"regexp"
++	"strings"
+ 	"sync"
+ 	"testing"
+ 	"time"
+@@ -427,3 +430,25 @@ func TestLatest_NilStore(t *testing.T) {
+ 	_, ok := s.Latest()
+ 	assert.False(t, ok)
+ }
++
++func TestTaskFiles_ByIndexThenByTitleAndNeverOnDisk(t *testing.T) {
++	s := NewStore(time.Hour)
++	run := s.CreateWithTasks("pass", "rigorous", []PlanTask{
++		{Index: 1, Title: "Task 1: Store", Files: []string{"pkg/store.go"}},
++		{Index: 2, Title: "Task 2: Cache", Files: []string{"pkg/cache.go"}},
++	})
++
++	assert.Equal(t, []string{"pkg/cache.go"}, s.TaskFiles(run.ID, TaskRef{Index: 2, Title: "store"}), "an index in range wins over the title")
++	got := s.TaskFiles(run.ID, TaskRef{Title: "task 1:  store"})
++	require.Equal(t, []string{"pkg/store.go"}, got, "a title matches its heading")
++	got[0] = "changed"
++	assert.Equal(t, []string{"pkg/store.go"}, s.TaskFiles(run.ID, TaskRef{Index: 1}), "TaskFiles returns a copy")
++	assert.Nil(t, s.TaskFiles(run.ID, TaskRef{Index: 9, Title: "nothing"}), "an unmatched task lists nothing")
++	assert.Nil(t, s.TaskFiles("pr_unknown", TaskRef{Index: 1}), "an unknown run lists nothing")
++
++	dir := t.TempDir()
++	require.NoError(t, (&Ledger{Dir: dir}).AppendHeader(run))
++	b, err := os.ReadFile(filepath.Join(dir, ledgerFile))
++	require.NoError(t, err)
++	assert.False(t, strings.Contains(string(b), "pkg/"), "the ledger header must not carry file paths: %s", b)
++}
+diff --git a/internal/prompts/testdata/plan_basic.golden b/internal/prompts/testdata/plan_basic.golden
+index f311ce5..957dc8c 100644
+--- a/internal/prompts/testdata/plan_basic.golden
++++ b/internal/prompts/testdata/plan_basic.golden
+@@ -10,7 +10,7 @@ Every finding's `evidence` field must quote or paraphrase text that literally ap
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Plan under review
+ 
+diff --git a/internal/prompts/testdata/plan_basic_quick.golden b/internal/prompts/testdata/plan_basic_quick.golden
+index 2a9d5bc..1f78cb6 100644
+--- a/internal/prompts/testdata/plan_basic_quick.golden
++++ b/internal/prompts/testdata/plan_basic_quick.golden
+@@ -10,7 +10,7 @@ Every finding's `evidence` field must quote or paraphrase text that literally ap
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Plan under review
+ 
+diff --git a/internal/prompts/testdata/plan_basic_with_context_files.golden b/internal/prompts/testdata/plan_basic_with_context_files.golden
+index 613cb77..371f099 100644
+--- a/internal/prompts/testdata/plan_basic_with_context_files.golden
++++ b/internal/prompts/testdata/plan_basic_with_context_files.golden
+@@ -29,7 +29,7 @@ A `contradicted_codebase_claim` finding must satisfy the evidence rule above AND
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example. This does not apply when you quote a signature or symbol verbatim from an attached file — that is ground truth, not illustration, and is the evidence a `contradicted_codebase_claim` finding rests on.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone or from an attached file — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone or from an attached file — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Attached source files (complete contents, read from disk by the server)
+ 
+diff --git a/internal/prompts/testdata/plan_basic_with_project_knowledge.golden b/internal/prompts/testdata/plan_basic_with_project_knowledge.golden
+index e7d8622..90ffc45 100644
+--- a/internal/prompts/testdata/plan_basic_with_project_knowledge.golden
++++ b/internal/prompts/testdata/plan_basic_with_project_knowledge.golden
+@@ -14,7 +14,7 @@ When Project knowledge is supplied, evidence may also be tied to text quoted fro
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Project knowledge (caller-supplied context from the team's KB)
+ 
+diff --git a/internal/prompts/testdata/plan_basic_with_project_knowledge_and_context_files.golden b/internal/prompts/testdata/plan_basic_with_project_knowledge_and_context_files.golden
+index bf7586f..44e713e 100644
+--- a/internal/prompts/testdata/plan_basic_with_project_knowledge_and_context_files.golden
++++ b/internal/prompts/testdata/plan_basic_with_project_knowledge_and_context_files.golden
+@@ -33,7 +33,7 @@ A `contradicted_codebase_claim` finding must satisfy the evidence rule above AND
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example. This does not apply when you quote a signature or symbol verbatim from an attached file — that is ground truth, not illustration, and is the evidence a `contradicted_codebase_claim` finding rests on.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone or from an attached file — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone or from an attached file — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Project knowledge (caller-supplied context from the team's KB)
+ 
+diff --git a/internal/prompts/testdata/plan_findings_only.golden b/internal/prompts/testdata/plan_findings_only.golden
+index 8388fb0..e0775e1 100644
+--- a/internal/prompts/testdata/plan_findings_only.golden
++++ b/internal/prompts/testdata/plan_findings_only.golden
+@@ -10,7 +10,7 @@ Every finding's `evidence` field must quote or paraphrase text that literally ap
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Plan under review
+ 
+diff --git a/internal/prompts/testdata/plan_findings_only_quick.golden b/internal/prompts/testdata/plan_findings_only_quick.golden
+index d007a3d..0030ee7 100644
+--- a/internal/prompts/testdata/plan_findings_only_quick.golden
++++ b/internal/prompts/testdata/plan_findings_only_quick.golden
+@@ -10,7 +10,7 @@ Every finding's `evidence` field must quote or paraphrase text that literally ap
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Plan under review
+ 
+diff --git a/internal/prompts/testdata/plan_findings_only_with_project_knowledge.golden b/internal/prompts/testdata/plan_findings_only_with_project_knowledge.golden
+index 708fae0..63ab9dc 100644
+--- a/internal/prompts/testdata/plan_findings_only_with_project_knowledge.golden
++++ b/internal/prompts/testdata/plan_findings_only_with_project_knowledge.golden
+@@ -14,7 +14,7 @@ When Project knowledge is supplied, evidence may also be tied to text quoted fro
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Project knowledge (caller-supplied context from the team's KB)
+ 
+diff --git a/internal/prompts/testdata/plan_tasks_chunk.golden b/internal/prompts/testdata/plan_tasks_chunk.golden
+index 6ab392e..f4509e4 100644
+--- a/internal/prompts/testdata/plan_tasks_chunk.golden
++++ b/internal/prompts/testdata/plan_tasks_chunk.golden
+@@ -10,7 +10,7 @@ Every finding's `evidence` field must quote or paraphrase text that literally ap
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Plan under review
+ 
+diff --git a/internal/prompts/testdata/plan_tasks_chunk_quick.golden b/internal/prompts/testdata/plan_tasks_chunk_quick.golden
+index 5bb1016..af507d6 100644
+--- a/internal/prompts/testdata/plan_tasks_chunk_quick.golden
++++ b/internal/prompts/testdata/plan_tasks_chunk_quick.golden
+@@ -10,7 +10,7 @@ Every finding's `evidence` field must quote or paraphrase text that literally ap
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Plan under review
+ 
+diff --git a/internal/prompts/testdata/plan_tasks_chunk_with_context_files.golden b/internal/prompts/testdata/plan_tasks_chunk_with_context_files.golden
+index 0f250fc..8b64436 100644
+--- a/internal/prompts/testdata/plan_tasks_chunk_with_context_files.golden
++++ b/internal/prompts/testdata/plan_tasks_chunk_with_context_files.golden
+@@ -29,7 +29,7 @@ A `contradicted_codebase_claim` finding must satisfy the evidence rule above AND
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example. This does not apply when you quote a signature or symbol verbatim from an attached file — that is ground truth, not illustration, and is the evidence a `contradicted_codebase_claim` finding rests on.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone or from an attached file — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone or from an attached file — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Attached source files (complete contents, read from disk by the server)
+ 
+diff --git a/internal/prompts/testdata/plan_tasks_chunk_with_project_knowledge.golden b/internal/prompts/testdata/plan_tasks_chunk_with_project_knowledge.golden
+index d741c70..6439285 100644
+--- a/internal/prompts/testdata/plan_tasks_chunk_with_project_knowledge.golden
++++ b/internal/prompts/testdata/plan_tasks_chunk_with_project_knowledge.golden
+@@ -14,7 +14,7 @@ When Project knowledge is supplied, evidence may also be tied to text quoted fro
+ 
+ When you cite a code symbol's signature, an example sibling key, or an adjacent attribute value as an *illustration*, prefix it with `e.g. illustrative —`. The reader does not know whether your illustration matches the codebase, and false confidence is worse than no example.
+ 
+-When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase.
++When the plan asserts something about the codebase that you cannot verify from the plan text alone — a field name, function signature, file path, insertion point in a graph, existing convention in adjacent code, or a type-system fact — DO emit a finding with `category: unverifiable_codebase_claim`. Severity should be `minor` (the claim might be true; you just can't check). `evidence` quotes the claim verbatim from the plan. `suggestion` says "verify against the actual code before dispatching." Do this instead of silently passing or fabricating a critique. The human will see the checklist and grep the codebase. A path a task lists under its own `**Files:**` section says where that task works, not what the codebase holds: do not emit this finding for the path itself.
+ 
+ ## Project knowledge (caller-supplied context from the team's KB)
+ 
