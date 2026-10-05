@@ -763,7 +763,7 @@ func TestValidatePlan_ARulingThatLeavesCarriedPlanLevelFindingsSaysTheyWereCarri
 	assert.Equal(t, verdict.VerdictWarn, second.PlanVerdict)
 	require.Len(t, second.PlanFindings, 1)
 	assert.NotEqual(t, "round one", second.NextAction)
-	assert.Contains(t, second.NextAction, "carried from the earlier round")
+	assert.Contains(t, second.NextAction, "This round made no reviewer call")
 	assert.Contains(t, second.NextAction, "plan_run_id")
 }
 
@@ -832,7 +832,7 @@ func TestValidatePlan_AServerFindingAddedOnACarriedRoundReplacesTheStoredNextAct
 	assert.Equal(t, 1, sr.calls)
 	require.True(t, hasCriterion(second.PlanFindings, "task_order_contradiction"), "the disk tier found the missing Modify target")
 	assert.Equal(t, verdict.VerdictWarn, second.PlanVerdict)
-	assert.Contains(t, second.NextAction, "carried from the earlier round",
+	assert.Contains(t, second.NextAction, "This round made no reviewer call",
 		"the stored next_action was written before the server found the missing file")
 }
 
@@ -870,4 +870,27 @@ func TestValidatePlan_ARulingReachesACarriedTaskWithADuplicateTitleOnATruncatedR
 	assert.Empty(t, carried.Findings)
 	require.Len(t, carried.WaivedFindings, 1)
 	assert.Equal(t, id, carried.WaivedFindings[0].ID)
+}
+
+// A ruling waives the carried major finding while the file check adds another
+// major one: the verdict and the number of findings are what they were, and
+// the stored sentence is about the finding that was just waived.
+func TestValidatePlan_AWaivedFindingReplacedByAServerFindingReplacesTheStoredNextAction(t *testing.T) {
+	plan := "# Plan\n\n### Task 1: t1\n\n**Goal:** g1\n\n**Files:**\n- Modify: `pkg/missing.go`\n\n**Acceptance criteria:**\n- ac1\n\n"
+	h, sr := roundHandlers(t, 8, roundSingleResp(roundOrder, roundTitles(1)...))
+
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: plan})
+	require.Equal(t, verdict.VerdictWarn, first.PlanVerdict)
+	require.Len(t, first.PlanFindings, 1)
+
+	second := validatePlanRound(t, h, ValidatePlanArgs{
+		PlanText: plan, PlanRunID: first.PlanRunID, RepoRoot: t.TempDir(),
+		ControllerRulings: []ControllerRulingArg{{FindingID: first.PlanFindings[0].ID, Ruling: "the order is intended"}},
+	})
+
+	assert.Equal(t, 1, sr.calls)
+	assert.Equal(t, verdict.VerdictWarn, second.PlanVerdict)
+	require.Len(t, second.PlanFindings, 1, "one waived, one added")
+	assert.Equal(t, "task_order_contradiction", second.PlanFindings[0].Criterion)
+	assert.Contains(t, second.NextAction, "This round made no reviewer call")
 }

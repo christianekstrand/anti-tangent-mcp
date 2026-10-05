@@ -13,6 +13,7 @@ import (
 	"io"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/patiently/anti-tangent-mcp/internal/config"
 	"github.com/patiently/anti-tangent-mcp/internal/planparser"
@@ -430,7 +431,7 @@ func truncatedRoundResult(partial verdict.PlanResult, round planRound) (verdict.
 // output as the reviewer saw it, so it stays only while everything the server
 // applies to that output — this round's rulings and verified references, and
 // the file-consistency check — leaves the outcome as the reviewer's output
-// alone gives it. Once they change the verdict, the number of findings or the
+// alone gives it. Once they change the verdict, which findings remain or the
 // checklist, the stored sentence may tell the controller to fix what the
 // round just waived, or to dispatch a plan the server now holds back, and the
 // server's own sentence replaces it. A next_action the ladder wrote for this
@@ -445,17 +446,37 @@ func (c planCallContext) carriedNextAction(pr, raw verdict.PlanResult) string {
 	base := clonePlanResult(raw)
 	unruled.applyPreLadder(&base)
 	finalizePlanVerdict(&base, c.Tasks)
-	same := base.PlanVerdict == pr.PlanVerdict &&
-		len(planFindings(base)) == len(planFindings(pr)) &&
-		len(base.CodebaseReferenceChecklist) == len(pr.CodebaseReferenceChecklist)
-	if same {
+	if planOutcome(base) == planOutcome(pr) {
 		return pr.NextAction
 	}
 	if pr.PlanVerdict == verdict.VerdictPass {
 		return planPassesNextAction
 	}
-	return "The findings above were carried from the earlier round, and this round's rulings, verified references " +
-		"or file checks changed the outcome: fix each one or rule on it, then call validate_plan again with the same plan_run_id."
+	return "This round made no reviewer call: its rulings, verified references or file checks changed the outcome " +
+		"of the earlier review. Fix each finding above or rule on it, then call validate_plan again with the same plan_run_id."
+}
+
+// planOutcome renders what a plan result tells the controller to act on: the
+// verdict, every remaining finding by where it sits, its severity, category
+// and criterion, and the checklist. Two results with the same outcome differ
+// at most in wording, so a waived finding replaced by a new one of the same
+// severity still changes it.
+func planOutcome(pr verdict.PlanResult) string {
+	var b strings.Builder
+	add := func(scope string, findings []verdict.Finding) {
+		for _, f := range findings {
+			fmt.Fprintf(&b, "%s|%s|%s|%q\n", scope, f.Severity, f.Category, f.Criterion)
+		}
+	}
+	fmt.Fprintf(&b, "%s\n", pr.PlanVerdict)
+	add("plan", pr.PlanFindings)
+	for i, t := range pr.Tasks {
+		add(fmt.Sprintf("task %d", i), t.Findings)
+	}
+	for _, entry := range pr.CodebaseReferenceChecklist {
+		fmt.Fprintf(&b, "checklist|%q\n", entry)
+	}
+	return b.String()
 }
 
 // unknownPlanRunIDEchoMax bounds, in runes, how much of an unknown plan_run_id
