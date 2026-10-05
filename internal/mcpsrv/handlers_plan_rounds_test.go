@@ -796,3 +796,78 @@ func TestValidatePlan_ATruncatedRoundGivesACarriedTaskItsOwnNormativeTestBodies(
 	assert.Equal(t, []string{"func TestTask3(t *testing.T) {}"}, cut.Tasks[1].NormativeTestBodies,
 		"a carried task takes the bodies of the task at its plan position, not of the task that shares its title")
 }
+
+func TestValidatePlan_AVerifiedReferenceThatEmptiesTheChecklistReplacesTheStoredNextAction(t *testing.T) {
+	claim := `{"severity":"minor","category":"unverifiable_codebase_claim","criterion":"spec","evidence":"pkg/cache.go defines Evict","suggestion":"verify"}`
+	tasks := roundTitles(1)
+	tasks[0].findings = []string{roundMajor, claim}
+	h, sr := roundHandlers(t, 8, roundSingleResp("", tasks...))
+
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: buildPlanWithNTasks(1)})
+	require.Len(t, first.CodebaseReferenceChecklist, 1)
+	require.Equal(t, "round one", first.NextAction)
+
+	second := validatePlanRound(t, h, ValidatePlanArgs{
+		PlanText: buildPlanWithNTasks(1), PlanRunID: first.PlanRunID,
+		ControllerVerifiedReferences: []string{"pkg/cache.go"},
+	})
+
+	assert.Equal(t, 1, sr.calls)
+	assert.Empty(t, second.CodebaseReferenceChecklist)
+	assert.Equal(t, first.PlanVerdict, second.PlanVerdict)
+	assert.NotEqual(t, "round one", second.NextAction,
+		"the stored next_action was written with the reference still unverified")
+}
+
+func TestValidatePlan_AServerFindingAddedOnACarriedRoundReplacesTheStoredNextAction(t *testing.T) {
+	plan := "# Plan\n\n### Task 1: t1\n\n**Goal:** g1\n\n**Files:**\n- Modify: `pkg/missing.go`\n\n**Acceptance criteria:**\n- ac1\n\n"
+	h, sr := roundHandlers(t, 8, roundSingleResp("", roundTitles(1)...))
+
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: plan})
+	require.Equal(t, verdict.VerdictPass, first.PlanVerdict)
+	require.Equal(t, "round one", first.NextAction)
+
+	second := validatePlanRound(t, h, ValidatePlanArgs{PlanText: plan, PlanRunID: first.PlanRunID, RepoRoot: t.TempDir()})
+
+	assert.Equal(t, 1, sr.calls)
+	require.True(t, hasCriterion(second.PlanFindings, "task_order_contradiction"), "the disk tier found the missing Modify target")
+	assert.Equal(t, verdict.VerdictWarn, second.PlanVerdict)
+	assert.Contains(t, second.NextAction, "carried from the earlier round",
+		"the stored next_action was written before the server found the missing file")
+}
+
+// Two tasks with one title, a truncated round, and a ruling on the carried
+// one's finding. A task finding's id is built from the title without its
+// "Task N:" prefix, so tasks that share a title share a task key whichever of
+// them a result is matched to: the ruling still reaches the carried finding.
+func TestValidatePlan_ARulingReachesACarriedTaskWithADuplicateTitleOnATruncatedRound(t *testing.T) {
+	plan := func(ac2 string) string {
+		return "# Plan\n\n### Task 1: t1\n\n**Goal:** g\n\n**Acceptance criteria:**\n- ac1\n\n" +
+			"### Task 2: Add tests\n\n**Goal:** g\n\n**Acceptance criteria:**\n- " + ac2 + "\n\n" +
+			"### Task 3: Add tests\n\n**Goal:** g\n\n**Acceptance criteria:**\n- ac3\n\n"
+	}
+	h, sr := roundHandlers(t, 8,
+		roundSingleResp("",
+			roundTask{title: "Task 1: t1"},
+			roundTask{title: "Task 2: Add tests"},
+			roundTask{title: "Task 3: Add tests", findings: []string{roundMajor}}),
+		roundPlanLevelResp("", "n"),
+		providers.Response{RawJSON: []byte(`{"tasks":[`)},
+	)
+	sr.errors = []error{nil, nil, providers.ErrResponseTruncated}
+	first := validatePlanRound(t, h, ValidatePlanArgs{PlanText: plan("ac2")})
+	require.Len(t, first.Tasks[2].Findings, 1)
+	id := first.Tasks[2].Findings[0].ID
+
+	cut := validatePlanRound(t, h, ValidatePlanArgs{
+		PlanText: plan("ac2, measured"), PlanRunID: first.PlanRunID,
+		ControllerRulings: []ControllerRulingArg{{FindingID: id, Ruling: "ac1 is pinned by a test"}},
+	})
+
+	require.Len(t, cut.Tasks, 2, "Task 2 was cut short; Tasks 1 and 3 are carried")
+	carried := cut.Tasks[1]
+	assert.Equal(t, 3, carried.TaskIndex)
+	assert.Empty(t, carried.Findings)
+	require.Len(t, carried.WaivedFindings, 1)
+	assert.Equal(t, id, carried.WaivedFindings[0].ID)
+}
