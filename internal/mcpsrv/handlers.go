@@ -22,6 +22,7 @@ import (
 	"github.com/patiently/anti-tangent-mcp/internal/planrun"
 	"github.com/patiently/anti-tangent-mcp/internal/prompts"
 	"github.com/patiently/anti-tangent-mcp/internal/providers"
+	"github.com/patiently/anti-tangent-mcp/internal/ratedigest"
 	"github.com/patiently/anti-tangent-mcp/internal/session"
 	"github.com/patiently/anti-tangent-mcp/internal/stats"
 	"github.com/patiently/anti-tangent-mcp/internal/verdict"
@@ -1225,6 +1226,7 @@ type ValidateCompletionArgs struct {
 	ExitContractsInferred bool                  `json:"exit_contracts_inferred,omitempty" jsonschema:"validate_plan's exit_contracts_inferred for this task: true when the contracts were inferred from cross-task references rather than written in the plan, which caps a miss at minor."`
 	ModelOverride         string                `json:"model_override,omitempty" jsonschema:"Reviewer model for this call only, as provider:model, such as anthropic:claude-opus-4-7. Must be on the server's model allowlist."`
 	MaxTokensOverride     int                   `json:"max_tokens_override,omitempty" jsonschema:"Reviewer output-token budget for this call only. 0 uses the configured default; a value above ANTI_TANGENT_MAX_TOKENS_CEILING is clamped with a minor finding; a negative value is rejected."`
+	RateDigest            any                   `json:"rate_digest,omitempty" jsonschema:"Optional and unverified, like codescene: the eval run behind the change, as an object. n (required, 1 to 10000) and before_k / after_k (0 to n) are the target eval's counts; target_eval (at most 300 characters), interval_after ([low, high] between 0 and 1), suite ({evals, regressions}), kept (true when the change is kept, false when reverted) and rigidity_delta ({outbound_strings, veto_keys, state_markers, strategy_lines}) are optional; other keys are ignored. A malformed digest is dropped with a minor finding. With boundary rules or an experiment task, kept true and no diff is rejected with diff_required."`
 	Codescene             *codescene.Digest     `json:"codescene,omitempty" jsonschema:"The CodeScene result for this task: analyze_change_set's raw JSON, or the reduced digest. Unknown keys are ignored. pre_commit_code_health_safeguard sees only uncommitted changes, so after a commit it reports zero files and is not a run of the task. When a run was attempted and failed, send ran false with skip_reason and skip_evidence."`
 	FindingResponses      []FindingResponseArg  `json:"finding_responses,omitempty" jsonschema:"Your answers to findings you dispute from this task's last validate_completion response that was not partial, one per finding id. If the reviewer raises a critical or major finding you answered again, the response sets escalate. At most 50 entries of at most 2000 characters each; not counted toward the payload cap."`
 	ControllerRulings     []ControllerRulingArg `json:"controller_rulings,omitempty" jsonschema:"Rulings your controller issued on findings from this task's session, copied verbatim. A ruling covers every later finding with the same id, ignoring any -n suffix, for the rest of the session, which keeps at most 50 rulings. At most 50 entries of at most 2000 characters each; not counted toward the payload cap."`
@@ -1937,6 +1939,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 	if args.Codescene != nil {
 		args.Codescene.Normalize()
 	}
+	rateDigest, rateDigestProblem := ratedigest.Parse(args.RateDigest)
 
 	// 5. payload-cap check. In lightweight mode the surfaced session_id stays
 	// empty; otherwise we don't have the session yet, so use args.SessionID.
@@ -2062,7 +2065,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 	}
 
 	// 8a. Agent-network rejections, before any reviewer call.
-	if f, nextAction, rejected := agentRejection(spec, lightweight, args.FinalDiff, resolvedFiles); rejected {
+	if f, nextAction, rejected := agentRejection(spec, lightweight, args.FinalDiff, resolvedFiles, ratedigest.RawKept(args.RateDigest)); rejected {
 		env := prependClamp(agentRejectionEnvelope(args.SessionID, h.deps.Cfg.PostModel.String(), lightweight, f, nextAction), clamp)
 		h.recordStat(statParams{
 			tool:         "validate_completion",
@@ -2097,6 +2100,7 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 				ExitContracts:                  exitContracts,
 				ExitContractsInferred:          args.ExitContractsInferred,
 				Codescene:                      args.Codescene,
+				RateDigest:                     rateDigest,
 				StaleComments:                  staleComments,
 				ContextFiles:                   toPromptContextFiles(relatedFiles),
 			})
@@ -2189,6 +2193,9 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 		env.Findings = append(env.Findings, noSessionResponsesAdvisory())
 	}
 	env.Findings = append(env.Findings, modeFindings...)
+	if rateDigestProblem != "" {
+		env.Findings = append(env.Findings, rateDigestNote(rateDigestProblem))
+	}
 	assignEnvelopeIDs(&env)
 	// Restored after assignEnvelopeIDs, which clears same_as unconditionally:
 	// this is the one case where the reviewer's same_as is the actual answer,
@@ -2241,9 +2248,9 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 	}
 
 	if lightweight {
-		h.recordLightweightCompletionRow(args, env, overBuilding.ruled(waived))
+		h.recordLightweightCompletionRow(args, env, overBuilding.ruled(waived), rateDigest)
 	} else {
-		h.recordCompletionRow(sess, env, args.Codescene, args.FinalDiff, overBuilding.ruled(waived))
+		h.recordCompletionRow(sess, env, args.Codescene, args.FinalDiff, overBuilding.ruled(waived), rateDigest)
 	}
 
 	h.recordStat(statParams{

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/patiently/anti-tangent-mcp/internal/planparser"
+	"github.com/patiently/anti-tangent-mcp/internal/ratedigest"
 	"github.com/patiently/anti-tangent-mcp/internal/session"
 )
 
@@ -189,4 +190,20 @@ func TestAgentModeSections_AbsentByDefault(t *testing.T) {
 			require.NotContains(t, body, marker)
 		}
 	}
+}
+
+func TestRenderPost_ExperimentWithRateDigest_Golden(t *testing.T) {
+	five, seven, kept := 5, 7, false
+	out, err := RenderPost(PostInput{
+		Spec:         experimentSpec(),
+		Summary:      "Measured 5/10 before and 7/10 after at n=10; below the 8/10 threshold, so reverted.",
+		TestEvidence: "zip-missing: before 5/10, after 7/10 (n=10)\nsuite: 42 evals, 0 regressions\n",
+		RateDigest: &ratedigest.Digest{
+			TargetEval: "evals/core/zip-missing.yaml", N: 10, BeforeK: &five, AfterK: &seven,
+			Suite: &ratedigest.Suite{Evals: 42}, Kept: &kept,
+			RigidityDelta: &ratedigest.RigidityDelta{},
+		},
+	})
+	require.NoError(t, err)
+	golden(t, "post_experiment_with_rate_digest", out.System+"\n---USER---\n"+out.User)
 }

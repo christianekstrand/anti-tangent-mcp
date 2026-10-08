@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/patiently/anti-tangent-mcp/internal/codescene"
+	"github.com/patiently/anti-tangent-mcp/internal/ratedigest"
 	"github.com/patiently/anti-tangent-mcp/scorecard"
 )
 
@@ -77,6 +78,9 @@ type TaskRow struct {
 	// over_building finding was settled by an answer or a controller ruling
 	// instead of by cutting the structure.
 	OverBuildingRuled int `json:"over_building_ruled,omitempty"`
+	// RateDigest is the counts of the most recent rate_digest a
+	// validate_completion call on the task sent, without its eval path.
+	RateDigest *ratedigest.Digest `json:"rate_digest,omitempty"`
 }
 
 // PlanTask is one task of the validated plan: its 1-based position and its
@@ -474,6 +478,7 @@ func cloneRow(row TaskRow) TaskRow {
 	row.Severity = cloneIntMap(row.Severity)
 	row.Categories = cloneIntMap(row.Categories)
 	row.Codescene = cloneDigest(row.Codescene)
+	row.RateDigest = row.RateDigest.ForRecord()
 	row.Calls = append([]ToolCall(nil), row.Calls...)
 	return row
 }

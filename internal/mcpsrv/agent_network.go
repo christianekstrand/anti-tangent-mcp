@@ -298,9 +298,9 @@ func capProgressBoundaryViolations(fs []verdict.Finding) []verdict.Finding {
 // agentRejection returns the finding that rejects a validate_completion before
 // review for an agent-network reason, and false when none applies: an
 // experiment needs a session, and a boundary-checked or experiment task that
-// sends files must also send a diff, since the boundary check reads only the
-// lines a diff adds.
-func agentRejection(spec session.TaskSpec, lightweight bool, finalDiff string, files []FileArg) (verdict.Finding, string, bool) {
+// sends files, or records its change as kept, must also send a diff, since
+// the boundary check reads only the lines a diff adds.
+func agentRejection(spec session.TaskSpec, lightweight bool, finalDiff string, files []FileArg, kept bool) (verdict.Finding, string, bool) {
 	if lightweight && spec.Experiment() {
 		return verdict.Finding{
 			Severity:   verdict.SeverityMajor,
@@ -310,7 +310,7 @@ func agentRejection(spec session.TaskSpec, lightweight bool, finalDiff string, f
 			Suggestion: "Call validate_task_spec for this task, then validate_completion with the session_id it returns.",
 		}, "Call validate_task_spec for this experiment task, then call validate_completion with its session_id.", true
 	}
-	if finalDiff == "" && len(files) > 0 && (len(spec.BoundaryRules) > 0 || spec.Experiment()) {
+	if finalDiff == "" && (len(files) > 0 || kept) && (len(spec.BoundaryRules) > 0 || spec.Experiment()) {
 		return diffRequiredFinding(), "Re-submit with final_diff or final_diff_path: the boundary check runs on the lines the diff adds.", true
 	}
 	return verdict.Finding{}, "", false
@@ -391,4 +391,11 @@ func (h *handlers) lightweightAgentNetwork(args ValidateCompletionArgs) (agentNe
 	mode, conflicts := resolveAgentNetwork(sent, stored, attached, runID)
 	notes = append(notes, conflicts...)
 	return mode, append(notes, modeNotes(mode)...), nil
+}
+
+// rateDigestNote reports a rate_digest the server dropped as malformed.
+func rateDigestNote(problem string) verdict.Finding {
+	return agentNote(verdict.CategoryOther, "rate_digest",
+		"rate_digest was dropped: "+problem+".",
+		"Send rate_digest with n and the counts as integers, or leave it out.")
 }

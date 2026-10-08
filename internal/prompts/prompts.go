@@ -17,6 +17,7 @@ import (
 
 	"github.com/patiently/anti-tangent-mcp/internal/codescene"
 	"github.com/patiently/anti-tangent-mcp/internal/planparser"
+	"github.com/patiently/anti-tangent-mcp/internal/ratedigest"
 	"github.com/patiently/anti-tangent-mcp/internal/session"
 	"github.com/patiently/anti-tangent-mcp/internal/verdict"
 )
@@ -225,6 +226,7 @@ type PostInput struct {
 	ExitContracts                  []string
 	ExitContractsInferred          bool
 	Codescene                      *codescene.Digest
+	RateDigest                     *ratedigest.Digest
 	PriorFindings                  []PriorFinding
 	ControllerRulings              []session.Ruling
 	StaleComments                  *StaleCommentHint

@@ -2,10 +2,14 @@ package planrun
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/patiently/anti-tangent-mcp/internal/ratedigest"
 )
 
 func agentNetworkRun(t *testing.T, s *Store) *Run {
@@ -112,4 +116,54 @@ func TestSessionAgentNetwork_FollowsTheRowAndARevision(t *testing.T) {
 	require.False(t, ok)
 	_, ok = s.SessionAgentNetwork("pr_unknown", "sess-1")
 	require.False(t, ok)
+}
+
+func TestRender_RateColumnOnlyWithADigest(t *testing.T) {
+	plain := Render(sampleRun())
+	require.NotContains(t, plain, "Rate")
+
+	r := sampleRun()
+	five, eight := 5, 8
+	r.Rows[0].RateDigest = &ratedigest.Digest{N: 10, BeforeK: &five, AfterK: &eight,
+		Suite: &ratedigest.Suite{Evals: 42}, RigidityDelta: &ratedigest.RigidityDelta{StrategyLines: 3}}
+	got := Render(r)
+	lines := strings.Split(got, "\n")
+	var header, first, second string
+	for i, l := range lines {
+		if strings.HasPrefix(l, "  #  Task") {
+			header, first, second = l, lines[i+1], lines[i+2]
+		}
+	}
+	require.Contains(t, header, "Rate")
+	require.Contains(t, first, "5→8/10 · reg 0 · rig +0/+0/+0")
+	column := func(line, word string) int { return utf8.RuneCountInString(line[:strings.Index(line, word)]) }
+	require.Equal(t, column(header, "CodeScene"), column(first, "passed"), "the CodeScene column stays aligned")
+	require.Equal(t, column(header, "CodeScene"), column(second, "skipped"))
+}
+
+func TestCloneRow_DeepCopiesRateDigest(t *testing.T) {
+	k := 3
+	row := TaskRow{RateDigest: &ratedigest.Digest{N: 10, AfterK: &k}}
+	cp := cloneRow(row)
+	*cp.RateDigest.AfterK = 9
+	require.Equal(t, 3, *row.RateDigest.AfterK)
+}
+
+func TestRender_RateColumnFitsItsWidestCell(t *testing.T) {
+	r := sampleRun()
+	big, small := 10000, 5
+	r.Rows[0].RateDigest = &ratedigest.Digest{N: 10000, BeforeK: &big, AfterK: &big,
+		Suite: &ratedigest.Suite{Evals: 42}, RigidityDelta: &ratedigest.RigidityDelta{OutboundStrings: 12}}
+	r.Rows[1].RateDigest = &ratedigest.Digest{N: 10, AfterK: &small}
+	lines := strings.Split(Render(r), "\n")
+	var header, first, second string
+	for i, l := range lines {
+		if strings.HasPrefix(l, "  #  Task") {
+			header, first, second = l, lines[i+1], lines[i+2]
+		}
+	}
+	require.Contains(t, first, "10000→10000/10000 · reg 0 · rig +12/+0/+0")
+	column := func(line, word string) int { return utf8.RuneCountInString(line[:strings.Index(line, word)]) }
+	require.Equal(t, column(header, "CodeScene"), column(first, "passed"))
+	require.Equal(t, column(header, "CodeScene"), column(second, "skipped"))
 }
