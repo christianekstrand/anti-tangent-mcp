@@ -541,9 +541,11 @@ func kbStoreMismatchFindingsForBMCommands(cmds []verdict.BMCommand) []verdict.Fi
 }
 
 // resolveEnvelopeTestEvidence replaces each envelope's test_evidence_path with
-// the file's content. done is true when a file is over its cap: r is then the
-// payload_too_large result to return.
+// the file's content. done is true when a file is over its cap, or the files
+// together are over the payload cap they are exempt from one by one: r is then
+// the payload_too_large result to return.
 func (h *handlers) resolveEnvelopeTestEvidence(envs []CompletionEnvelopeArg, clamp verdict.Finding) (r verdict.ExtractResult, done bool, err error) {
+	total := 0
 	for i := range envs {
 		e := &envs[i]
 		if e.TestEvidencePath == "" {
@@ -562,6 +564,13 @@ func (h *handlers) resolveEnvelopeTestEvidence(envs []CompletionEnvelopeArg, cla
 		}
 		if rerr != nil {
 			return verdict.ExtractResult{}, false, fmt.Errorf("completion_envelopes[%d]: %w", i, rerr)
+		}
+		total += len(content)
+		if total > h.deps.Cfg.MaxPayloadBytes {
+			res := extractTooLargeResult(total, h.deps.Cfg.MaxPayloadBytes)
+			res.Findings[0].Criterion = "completion_envelopes[].test_evidence_path"
+			res.Findings[0].Suggestion = testEvidenceShrinkAdvice
+			return prependExtractClamp(res, clamp), true, nil
 		}
 		e.TestEvidence, e.TestEvidencePath = content, ""
 	}

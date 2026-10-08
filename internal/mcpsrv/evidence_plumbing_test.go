@@ -2,6 +2,7 @@ package mcpsrv
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,4 +168,27 @@ func TestCheckEvidenceShape_YAMLDocumentEnd(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtract_TestEvidencePathsTogetherOverThePayloadCap(t *testing.T) {
+	rv := &fakeReviewer{name: "anthropic", resp: extractPassResp("claude-sonnet-4-6")}
+	d := newDeps(t, rv)
+	h := &handlers{deps: d}
+	board := strings.Repeat(scoreboard, 20)
+	args := extractArgs()
+	args.CompletionEnvelopes[0].TestEvidence = ""
+	args.CompletionEnvelopes[0].TestEvidencePath = writeEvidence(t, "board.md", board)
+	second := args.CompletionEnvelopes[0]
+	second.TestEvidencePath = writeEvidence(t, "board2.md", board)
+	args.CompletionEnvelopes = append(args.CompletionEnvelopes, second)
+	argsBytes, _ := json.Marshal(args)
+	h.deps.Cfg.MaxPayloadBytes = 2*len(board) - 1
+	h.deps.Cfg.TestEvidenceMaxBytes = len(board)
+	require.Less(t, len(argsBytes), h.deps.Cfg.MaxPayloadBytes, "the arguments alone are under the cap")
+
+	_, r, err := h.ExtractProjectKnowledge(context.Background(), nil, args)
+	require.NoError(t, err)
+	require.Zero(t, rv.Calls, "rejected before review")
+	require.Equal(t, verdict.CategoryTooLarge, r.Findings[0].Category)
+	require.Equal(t, "completion_envelopes[].test_evidence_path", r.Findings[0].Criterion)
 }

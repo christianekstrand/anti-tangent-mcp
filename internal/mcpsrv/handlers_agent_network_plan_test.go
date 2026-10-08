@@ -124,6 +124,16 @@ func TestValidatePlan_UnknownHeaders(t *testing.T) {
 	require.Equal(t, verdict.VerdictPass, pr.PlanVerdict)
 }
 
+func TestValidatePlan_PlainPlanOwnKindLabels(t *testing.T) {
+	h, _ := agentNetworkPlanHandlers(t, planPassResp())
+	plan := "# Plan\n\n### Task 1: First\n\n**Kind:** bugfix\n**Rung:** 2\n\nbody\n"
+	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: plan})
+	require.NoError(t, err)
+	require.Empty(t, findingCategories(pr.PlanFindings))
+	require.Empty(t, findingCategories(pr.Tasks[0].Findings), "a plan with no Plan kind header may use Kind and Rung labels of its own")
+	require.Empty(t, pr.Tasks[0].TaskKind)
+}
+
 func TestValidatePlan_PlainPlanUnchanged(t *testing.T) {
 	h, rv := agentNetworkPlanHandlers(t, planPassResp())
 	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: "# Plan\n\n### Task 1: First\n\nbody\n"})

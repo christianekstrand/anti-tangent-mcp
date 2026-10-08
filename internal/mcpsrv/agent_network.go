@@ -97,7 +97,7 @@ func addPlanAgentNetworkNotes(pr *verdict.PlanResult, tasks []planparser.RawTask
 		if idx < 0 {
 			continue
 		}
-		pr.Tasks[i].Findings = append(pr.Tasks[i].Findings, taskHeaderNotes(tasks[idx])...)
+		pr.Tasks[i].Findings = append(pr.Tasks[i].Findings, taskHeaderNotes(planKind != "" || unknownPlanKind != "", tasks[idx])...)
 	}
 }
 
@@ -115,13 +115,15 @@ func declarationNotes(planKind, unknownPlanKind string, hasRules bool) []verdict
 }
 
 // taskHeaderNotes returns a parsed task's notes: an unknown **Kind:** or
-// **Rung:** value, and an experiment with no rung.
-func taskHeaderNotes(t planparser.RawTask) []verdict.Finding {
+// **Rung:** value, and an experiment with no rung. A plan with no
+// **Plan kind:** header may use Kind and Rung labels of its own, so its
+// unknown values raise nothing.
+func taskHeaderNotes(hasPlanKind bool, t planparser.RawTask) []verdict.Finding {
 	var out []verdict.Finding
-	if t.UnknownKind != "" {
+	if hasPlanKind && t.UnknownKind != "" {
 		out = append(out, unknownTaskKindNote(t.UnknownKind))
 	}
-	if t.UnknownRung != "" {
+	if hasPlanKind && t.UnknownRung != "" {
 		out = append(out, unknownRungNote(t.UnknownRung))
 	}
 	if t.Kind == planparser.TaskKindExperiment && t.Rung == "" {

@@ -180,7 +180,8 @@ runs" criterion no model can meet.
 
 `validate_plan` returns `task_kind`, `rung` and `plan_kind` per task; pass them on every
 per-task call. The plan run's values win when the call attaches to it (`kind_conflict` notes a
-different one), and an unknown value draws `unknown_kind`.
+different one), and an unknown value draws `unknown_kind`. A plan with no `**Plan kind:**`
+header may use `Kind:` and `Rung:` labels of its own: their unknown values draw nothing.
 
 Pass your project's boundary rules — what code may do with reply and user text — as
 `boundary_rules` on `validate_plan`; a per-task call attached to the run inherits them.

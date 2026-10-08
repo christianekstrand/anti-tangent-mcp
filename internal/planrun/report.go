@@ -441,7 +441,7 @@ func renderNeverDispatched(b *strings.Builder, r *Run, missing []int) {
 
 // rateColumnWidth is the rune width of the widest rate cell, and of the
 // "Rate" heading, or 0 when no row carries a rate digest: the column is
-// rendered only then, so a run without one reports as before.
+// rendered only then, so a run without one has no Rate column.
 func rateColumnWidth(rows []TaskRow) int {
 	width := 0
 	for _, row := range rows {

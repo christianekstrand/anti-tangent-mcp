@@ -239,13 +239,14 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 		env.NextAction += taskSpecChecklistNextAction
 	}
 
+	// After the verdict, like the plan_run_id advisory: the notes describe
+	// how the call declared its mode, not the spec, and are never stored as
+	// pre-task findings. The advisory goes last, where withdrawAttachedByTitle
+	// finds it.
+	env.Findings = append(env.Findings, modeFindings...)
 	if f, ok := h.taskSpecPlanRunAdvisory(planRunID, attachedByTitle, args.TaskIndex); ok {
 		env.Findings = append(env.Findings, f)
 	}
-	// After the verdict, like the plan_run_id advisory: the notes describe
-	// how the call declared its mode, not the spec, and are never stored as
-	// pre-task findings.
-	env.Findings = append(env.Findings, modeFindings...)
 	assignEnvelopeIDs(&env)
 
 	// A truncated review creates no session: the spec was not reviewed in full,
@@ -1092,10 +1093,6 @@ func recoverPartialPlanFindings(rawJSON []byte, prior verdict.PlanResult) (verdi
 	return pr, true
 }
 
-// completionShrinkAdvice is the recovery advice on validate_completion's
-// payload_too_large finding. It must not suggest spreading evidence over
-// several calls: each call is reviewed on its own, so the reviewer never sees
-// split evidence together and answers every part with insufficient_evidence.
 // testEvidenceShrinkAdvice is the remedy for a test_evidence_path over its
 // own cap.
 const testEvidenceShrinkAdvice = "Attach the Markdown scoreboard, or a per-eval summary, rather than raw run output. " +
@@ -1115,6 +1112,10 @@ func resolveTestEvidencePath(path string, roots []string, maxBytes int) (string,
 	return content, nil
 }
 
+// completionShrinkAdvice is the recovery advice on validate_completion's
+// payload_too_large finding. It must not suggest spreading evidence over
+// several calls: each call is reviewed on its own, so the reviewer never sees
+// split evidence together and answers every part with insufficient_evidence.
 const completionShrinkAdvice = "Each call is reviewed on its own, so evidence spread over several calls is never seen together. " +
 	"Regenerate the diff with -U1, leave out generated, lockfile and snapshot files, " +
 	"and do not send a file in both final_diff and final_files. " +

@@ -95,8 +95,8 @@ func (in planInputs) key() string {
 	for _, f := range files {
 		fields = append(fields, f.Path, strconv.Itoa(f.Bytes), f.SHA256)
 	}
-	// Appended only when set, so a review that uses neither keeps the key it
-	// had before either existed.
+	// Appended only when set, so the key of a review that uses neither does
+	// not depend on them.
 	if in.PlanKind != "" || len(in.BoundaryRules) > 0 {
 		fields = append(fields, "agent-network", in.PlanKind, strconv.Itoa(len(in.BoundaryRules)))
 		fields = append(fields, in.BoundaryRules...)
