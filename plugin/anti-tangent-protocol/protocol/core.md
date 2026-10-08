@@ -8,7 +8,7 @@ end to end).
 
 `anti-tangent-mcp` is an advisory MCP server that helps prevent implementing-subagent drift while working on **tasks from a written implementation plan**. It exposes ten tools: a plan-level handoff gate (`validate_plan`), three per-task lifecycle hooks (`validate_task_spec` / `check_progress` / `validate_completion`), an optional project-knowledge pair (`prime_project_knowledge` / `extract_project_knowledge`), a deterministic plan-run report and outcome record (`plan_run_report` / `record_review_outcome`), and an I/O-delegation pair (`bulk_read` / `code_write`) routing large reads and boilerplate generation to a cheap worker model. The first six use a reviewer LLM deliberately different from the implementer, so review isn't blind to its blind spots; the delegation pair sends nothing for review — it moves volume, not judgement. Authoritative design: [`docs/superpowers/specs/2026-05-07-anti-tangent-mcp-design.md`](https://github.com/patiently/anti-tangent-mcp/blob/main/docs/superpowers/specs/2026-05-07-anti-tangent-mcp-design.md).
 
-**Install, configure, and the full tool surface:** see [`README.md`](https://github.com/patiently/anti-tangent-mcp/blob/main/README.md). This document covers the protocol for using it.
+**Install, configure, and the full tool surface:** see [`README.md`](https://github.com/patiently/anti-tangent-mcp/blob/main/README.md).
 
 This document has three audiences:
 
@@ -16,7 +16,7 @@ This document has three audiences:
 - **Controllers** (orchestrators dispatching implementers — superpowers' `subagent-driven-development`, hone-ai's equivalent, or a hand-rolled loop) — a **required plan-handoff gate** plus a paste-in dispatch clause per subagent prompt.
 - **Implementing subagents** — a paste-in lifecycle clause mandating pre + post calls, with mid calls when the guard asks or drift is suspected, and how to handle findings.
 
-The integration is **system-agnostic**: superpowers, hone-ai, vanilla Claude Code with a project-level `CLAUDE.md`, Cursor, or any MCP-capable harness. It ships as this core part plus the role parts above and the optional `project-knowledge.md`; load the ones your role needs and paste the relevant chunks where they belong.
+The integration is **system-agnostic**: superpowers, hone-ai, vanilla Claude Code, Cursor, or any MCP-capable harness. It ships as this core part plus the role parts above and the optional `project-knowledge.md`; load the ones your role needs and paste the relevant chunks where they belong.
 
 > **When does anti-tangent-mcp earn its keep?** Its value compounds when (a) tasks are specced before implementation, (b) the implementer is an LLM that can drift, and (c) implementer and reviewer LLMs differ. Without all three it is just extra latency.
 
@@ -24,7 +24,7 @@ The integration is **system-agnostic**: superpowers, hone-ai, vanilla Claude Cod
 
 ## Scope and limits
 
-**Good at.** Plan-internal consistency: contradictions between ACs, missing observable assertions, scope creep against non-goals, structural completeness of task headers, hedge language in ACs.
+**Good at.** Plan-internal consistency: contradictions between ACs, missing observable assertions, scope creep against non-goals, structural completeness of task headers, vague or untestable ACs, gates contradicting a Non-goal.
 
 **Structurally cannot catch.** The reviewer reasons over plan text and submitted evidence — *not* the codebase. It will not detect:
 
@@ -113,8 +113,8 @@ If unsure, look for the structured task block. No block → no protocol. Don't f
 
 **Finding categories.** Reviewer set (authoritative enum: `internal/verdict/verdict.go`):
 
-- Spec / lifecycle: `missing_acceptance_criterion`, `scope_drift`, `ambiguous_spec`, `unaddressed_finding`, `quality`, `convention_deviation`, `attestation_contradiction`, `unverifiable_codebase_claim`, `contradicted_codebase_claim`, `correctness`, `test_adequacy`, `other`.
-- Evidence: `insufficient_evidence` — emitted by `validate_completion` when an AC cannot be assessed from the submitted evidence, and by `extract_project_knowledge`. Server-only: `malformed_evidence`, `codescene_not_run`, `codescene_skipped`.
+- Spec / lifecycle: `missing_acceptance_criterion`, `scope_drift`, `ambiguous_spec`, `unaddressed_finding`, `quality`, `convention_deviation`, `attestation_contradiction`, `unverifiable_codebase_claim`, `contradicted_codebase_claim`, `correctness`, `test_adequacy`, `boundary_violation`, `other`.
+- Evidence: `insufficient_evidence` — an AC the submitted evidence cannot settle (also `extract_project_knowledge`). Server-only: `malformed_evidence`, `codescene_not_run`, `codescene_skipped`, `diff_required`; agent-network notes: `authoring.md` §3.11.
 - Operational: `session_not_found`, `payload_too_large`.
 - Project-knowledge: `kb_gap`, `ambiguous_pick`, `missing_index_entry` (prime); `redundant_proposal`, `contradicts_existing` (extract).
 

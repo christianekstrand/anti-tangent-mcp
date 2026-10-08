@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The pre-task review tells the reviewer never to propose a string or regex assertion over model-written text as the testable form of an acceptance criterion. This line renders on every `validate_task_spec` call.
 - The evidence-shape guard accepts a bare `...` line in a `.yaml` or `.yml` file, where it ends a document. `.json` is still checked: valid JSON cannot hold one.
+- `anti-tangent-protocol` 0.4.0: `authoring.md` §3.11 documents agent-network plans and experiment tasks; `controller.md`, `implementer.md` and `core.md` point to it, and `core.md` states what the pre-task review checks instead of "hedge language".
 
 ## [0.27.0] - 2026-10-04
 
