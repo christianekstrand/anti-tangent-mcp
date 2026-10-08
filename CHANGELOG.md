@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `validate_completion` and the `extract_project_knowledge` envelopes take `test_evidence_path`, read like `final_diff_path` and mutually exclusive with `test_evidence`. It has its own cap, `ANTI_TANGENT_TEST_EVIDENCE_MAX_BYTES` (default 262144), outside the payload cap; an oversized file returns `payload_too_large` and an empty one is handled like an empty `final_diff_path`.
 - `validate_completion` takes `rate_digest`, caller-supplied and unverified like `codescene`: an eval run's `n`, `before_k`, `after_k`, `target_eval`, `interval_after`, `suite`, `kept` and `rigidity_delta`. The reviewer is shown it as unverified and checks it against an experiment's criteria. A malformed digest is dropped with a minor finding and never refuses the call. With boundary rules or on an experiment, a digest recording the change as kept without a diff draws `diff_required`. The task's plan-run row keeps the counts, not the eval's path, and `plan_run_report` shows them in a `Rate` column when any task sent a digest.
 - `record_review_outcome` takes `measurements`, at most 200 `{task_index, metric, before, after, n}` entries, stored with the outcome in `outcomes.jsonl` for comparing runs. The scorecard does not score them.
+- Seven replay fixtures under `internal/mcpsrv/testdata/replay/agent-network` calibrate the agent-network checks against a live reviewer with `TestReplay_E2E`; a dry run of them is part of the ordinary test suite.
 
 ### Changed
 
