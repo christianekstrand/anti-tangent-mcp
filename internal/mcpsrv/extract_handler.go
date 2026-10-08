@@ -28,6 +28,9 @@ type CompletionEnvelopeArg struct {
 	FinalDiff    string            `json:"final_diff,omitempty" jsonschema:"The unified diff the implementer submitted."`
 	FinalFiles   []FileArg         `json:"final_files,omitempty" jsonschema:"The files the implementer submitted, with full content."`
 	TestEvidence string            `json:"test_evidence,omitempty" jsonschema:"The test output the implementer submitted."`
+	// TestEvidencePath is read in place of TestEvidence, as validate_completion
+	// reads it.
+	TestEvidencePath string `json:"test_evidence_path,omitempty" jsonschema:"Absolute path to the test evidence file the implementer submitted as test_evidence_path; mutually exclusive with test_evidence. Read under ANTI_TANGENT_PLAN_ROOTS and ANTI_TANGENT_TEST_EVIDENCE_MAX_BYTES; it does not count toward the payload cap."`
 }
 
 // ExtractProjectKnowledgeArgs is the input schema for extract_project_knowledge.
@@ -126,6 +129,17 @@ func (h *handlers) ExtractProjectKnowledge(ctx context.Context, _ *mcp.CallToolR
 		r := prependExtractClamp(extractTooLargeResult(size, h.deps.Cfg.MaxPayloadBytes), clamp)
 		logOutcome, logModelUsed, logVerdict, logFindings = "payload_too_large", h.deps.Cfg.ExtractModel.String(), r.Verdict, r.Findings
 		return extractEnvelopeResult(r, h.deps.Cfg.ExtractModel.String(), 0)
+	}
+
+	// 3b. Read each envelope's test_evidence_path. After the payload cap,
+	// which the file does not count toward, and before the evidence
+	// accounting, which must see the content.
+	if r, done, err := h.resolveEnvelopeTestEvidence(args.CompletionEnvelopes, clamp); done || err != nil {
+		if done {
+			logOutcome, logModelUsed, logVerdict, logFindings = "payload_too_large", h.deps.Cfg.ExtractModel.String(), r.Verdict, r.Findings
+			return extractEnvelopeResult(r, h.deps.Cfg.ExtractModel.String(), 0)
+		}
+		return nil, verdict.ExtractResult{}, err
 	}
 
 	// 4. Per-envelope evidence accounting (BEFORE model resolution).
@@ -524,4 +538,32 @@ func kbStoreMismatchFindingsForBMCommands(cmds []verdict.BMCommand) []verdict.Fi
 		permalinks = append(permalinks, perma)
 	}
 	return kbStoreMismatchFindingsForPermalinks(permalinks)
+}
+
+// resolveEnvelopeTestEvidence replaces each envelope's test_evidence_path with
+// the file's content. done is true when a file is over its cap: r is then the
+// payload_too_large result to return.
+func (h *handlers) resolveEnvelopeTestEvidence(envs []CompletionEnvelopeArg, clamp verdict.Finding) (r verdict.ExtractResult, done bool, err error) {
+	for i := range envs {
+		e := &envs[i]
+		if e.TestEvidencePath == "" {
+			continue
+		}
+		if e.TestEvidence != "" {
+			return verdict.ExtractResult{}, false, fmt.Errorf("completion_envelopes[%d]: test_evidence and test_evidence_path are mutually exclusive", i)
+		}
+		content, rerr := resolveTestEvidencePath(e.TestEvidencePath, h.deps.Cfg.PlanRoots, h.deps.Cfg.TestEvidenceMaxBytes)
+		var tooLarge *completionInputTooLargeError
+		if errors.As(rerr, &tooLarge) {
+			res := extractTooLargeResult(tooLarge.bytes, h.deps.Cfg.TestEvidenceMaxBytes)
+			res.Findings[0].Criterion = fmt.Sprintf("completion_envelopes[%d].test_evidence_path", i)
+			res.Findings[0].Suggestion = testEvidenceShrinkAdvice
+			return prependExtractClamp(res, clamp), true, nil
+		}
+		if rerr != nil {
+			return verdict.ExtractResult{}, false, fmt.Errorf("completion_envelopes[%d]: %w", i, rerr)
+		}
+		e.TestEvidence, e.TestEvidencePath = content, ""
+	}
+	return verdict.ExtractResult{}, false, nil
 }

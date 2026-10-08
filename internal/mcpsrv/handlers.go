@@ -1095,6 +1095,25 @@ func recoverPartialPlanFindings(rawJSON []byte, prior verdict.PlanResult) (verdi
 // payload_too_large finding. It must not suggest spreading evidence over
 // several calls: each call is reviewed on its own, so the reviewer never sees
 // split evidence together and answers every part with insufficient_evidence.
+// testEvidenceShrinkAdvice is the remedy for a test_evidence_path over its
+// own cap.
+const testEvidenceShrinkAdvice = "Attach the Markdown scoreboard, or a per-eval summary, rather than raw run output. " +
+	"The operator can raise the cap with ANTI_TANGENT_TEST_EVIDENCE_MAX_BYTES."
+
+// resolveTestEvidencePath reads a test_evidence_path under roots and its own
+// cap. An oversized file is a completionInputTooLargeError, so each tool can
+// answer it with its payload_too_large shape.
+func resolveTestEvidencePath(path string, roots []string, maxBytes int) (string, error) {
+	content, src, err := resolveFileInput(path, roots, maxBytes)
+	if errors.Is(err, errTooLarge) {
+		return "", &completionInputTooLargeError{field: "test_evidence_path", bytes: src.Bytes, err: err}
+	}
+	if err != nil {
+		return "", fmt.Errorf("test_evidence_path: %w", err)
+	}
+	return content, nil
+}
+
 const completionShrinkAdvice = "Each call is reviewed on its own, so evidence spread over several calls is never seen together. " +
 	"Regenerate the diff with -U1, leave out generated, lockfile and snapshot files, " +
 	"and do not send a file in both final_diff and final_files. " +
@@ -1201,6 +1220,7 @@ type ValidateCompletionArgs struct {
 	RepoRoot              string                `json:"repo_root,omitempty" jsonschema:"Absolute path to the checkout the diff applies to. The server reads the post-change version of each file the diff names beneath it, within ANTI_TANGENT_PLAN_ROOTS and the context_paths byte caps, and shows the reviewer only the comment lines that still name a symbol the diff removes, so nothing it reads counts toward the payload cap. Without it those comments are looked for in the evidence alone; an unusable repo_root draws a minor finding."`
 	ContextPaths          []string              `json:"context_paths,omitempty" jsonschema:"Absolute paths to related files that are not part of the change, such as a sibling helper the change might re-implement: the server reads them and shows the reviewer their whole contents. The reviewer is told they are never evidence for an acceptance criterion — the server cannot enforce what a model counts — and that the reuse: check needs a diff (final_diff or final_diff_path); with final_files alone it raises no over-building finding. With ANTI_TANGENT_PLAN_ROOTS set each path must be under one of those roots. At most 50 files, each within ANTI_TANGENT_CONTEXT_MAX_FILE_BYTES and together within ANTI_TANGENT_CONTEXT_MAX_PAYLOAD_BYTES; they do not count toward the validate_completion payload cap."`
 	TestEvidence          string                `json:"test_evidence,omitempty" jsonschema:"The test run output that proves the change, verbatim. Output showing no test executed draws a finding."`
+	TestEvidencePath      string                `json:"test_evidence_path,omitempty" jsonschema:"Absolute path to a file the server reads as test_evidence, such as an eval scoreboard; mutually exclusive with test_evidence. Within ANTI_TANGENT_PLAN_ROOTS when set, and within ANTI_TANGENT_TEST_EVIDENCE_MAX_BYTES, default 262144 bytes; it does not count toward the payload cap. The whole file goes to the reviewer vendor."`
 	ExitContracts         []string              `json:"exit_contracts,omitempty" jsonschema:"Symbols or behavior later tasks rely on this task leaving in place, copied from validate_plan's exit_contracts for this task; a hard miss draws missing_acceptance_criterion. At most 50 entries of at most 500 characters each."`
 	ExitContractsInferred bool                  `json:"exit_contracts_inferred,omitempty" jsonschema:"validate_plan's exit_contracts_inferred for this task: true when the contracts were inferred from cross-task references rather than written in the plan, which caps a miss at minor."`
 	ModelOverride         string                `json:"model_override,omitempty" jsonschema:"Reviewer model for this call only, as provider:model, such as anthropic:claude-opus-4-7. Must be on the server's model allowlist."`
@@ -1349,10 +1369,12 @@ func unquoteDiffPathName(name string) string {
 }
 
 // ellipsisExemptPath reports whether a bare `...` line is legitimate content
-// in the file at path: in Python, `...` is the idiomatic body of a stub.
+// in the file at path: in Python, `...` is the idiomatic body of a stub, and
+// in YAML it ends a document. JSON is not exempt: valid JSON cannot hold a
+// bare `...` line, so there it can only mean elided content.
 func ellipsisExemptPath(path string) bool {
 	switch strings.ToLower(filepath.Ext(strings.TrimSpace(path))) {
-	case ".py", ".pyi":
+	case ".py", ".pyi", ".yaml", ".yml":
 		return true
 	}
 	return false
@@ -1490,6 +1512,14 @@ func (h *handlers) resolveCompletionInputs(args *ValidateCompletionArgs) ([]File
 	maxBytes := h.deps.Cfg.MaxPayloadBytes
 	roots := h.deps.Cfg.PlanRoots
 	diskTotal := 0
+
+	if args.TestEvidencePath != "" {
+		content, err := resolveTestEvidencePath(args.TestEvidencePath, roots, h.deps.Cfg.TestEvidenceMaxBytes)
+		if err != nil {
+			return nil, err
+		}
+		args.TestEvidence = content
+	}
 
 	if args.FinalDiffPath != "" {
 		content, src, err := resolveFileInput(args.FinalDiffPath, roots, maxBytes)
@@ -1681,6 +1711,9 @@ func resolvedEmptyPathInputs(args *ValidateCompletionArgs, resolvedFiles []FileA
 	if args.FinalDiffPath != "" && args.FinalDiff == "" {
 		reasons = append(reasons, fmt.Sprintf("final_diff_path resolved to 0 bytes: %s", args.FinalDiffPath))
 	}
+	if args.TestEvidencePath != "" && args.TestEvidence == "" {
+		reasons = append(reasons, fmt.Sprintf("test_evidence_path resolved to 0 bytes: %s", args.TestEvidencePath))
+	}
 	for i, f := range resolvedFiles {
 		if f.Content != "" {
 			continue
@@ -1787,16 +1820,20 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 		return nil, Envelope{}, errors.New("summary is required")
 	}
 
-	// 2. final_diff / final_diff_path are mutually exclusive.
+	// 2. final_diff / final_diff_path, and test_evidence / test_evidence_path,
+	// are mutually exclusive.
 	if args.FinalDiff != "" && args.FinalDiffPath != "" {
 		return nil, Envelope{}, errors.New("final_diff and final_diff_path are mutually exclusive")
 	}
+	if args.TestEvidence != "" && args.TestEvidencePath != "" {
+		return nil, Envelope{}, errors.New("test_evidence and test_evidence_path are mutually exclusive")
+	}
 
 	// 2b. at-least-one-evidence: rejects the "totally empty call" case
-	// regardless of whether session_id is set. final_diff_path counts as
+	// regardless of whether session_id is set. A path input counts as
 	// evidence even before it is resolved.
-	if len(args.FinalFiles) == 0 && args.FinalDiff == "" && args.FinalDiffPath == "" && args.TestEvidence == "" {
-		return nil, Envelope{}, errors.New("validate_completion: at least one of final_files, final_diff, final_diff_path, or test_evidence must be non-empty")
+	if len(args.FinalFiles) == 0 && args.FinalDiff == "" && args.FinalDiffPath == "" && args.TestEvidence == "" && args.TestEvidencePath == "" {
+		return nil, Envelope{}, errors.New("validate_completion: at least one of final_files, final_diff, final_diff_path, test_evidence or test_evidence_path must be non-empty")
 	}
 
 	// 2c. max-tokens override + clamp finding. Computed before resolution so
@@ -1829,9 +1866,13 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 	if err != nil {
 		var tooLarge *completionInputTooLargeError
 		if errors.As(err, &tooLarge) {
-			env := prependClamp(tooLargeEnvelope("validate_completion", args.SessionID, h.deps.Cfg.PostModel, tooLarge.bytes, h.deps.Cfg.MaxPayloadBytes,
+			limit, advice := h.deps.Cfg.MaxPayloadBytes, completionShrinkAdvice
+			if tooLarge.field == "test_evidence_path" {
+				limit, advice = h.deps.Cfg.TestEvidenceMaxBytes, testEvidenceShrinkAdvice
+			}
+			env := prependClamp(tooLargeEnvelope("validate_completion", args.SessionID, h.deps.Cfg.PostModel, tooLarge.bytes, limit,
 				fmt.Sprintf("%s is %d bytes, over the %d-byte cap. %s",
-					tooLarge.field, tooLarge.bytes, h.deps.Cfg.MaxPayloadBytes, completionShrinkAdvice)), clamp)
+					tooLarge.field, tooLarge.bytes, limit, advice)), clamp)
 			env.Lightweight = lightweight
 			h.recordStat(statParams{
 				tool:         "validate_completion",

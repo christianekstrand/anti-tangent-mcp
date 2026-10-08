@@ -234,6 +234,7 @@ func TestToolInputSchemas_StatedLimitsMatchConstants(t *testing.T) {
 		"validate_plan.boundary_rules":                              {n(maxBoundaryRules), n(maxBoundaryRuleChars)},
 		"validate_task_spec.boundary_rules":                         {n(maxBoundaryRules), n(maxBoundaryRuleChars)},
 		"validate_completion.boundary_rules":                        {n(maxBoundaryRules), n(maxBoundaryRuleChars)},
+		"validate_completion.test_evidence_path":                    {"ANTI_TANGENT_PLAN_ROOTS", "ANTI_TANGENT_TEST_EVIDENCE_MAX_BYTES", "262144"},
 	}
 	for path, wants := range cases {
 		desc, ok := descs[path]

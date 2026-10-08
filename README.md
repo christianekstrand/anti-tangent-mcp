@@ -216,6 +216,7 @@ ANTI_TANGENT_CONTEXT_MAX_PAYLOAD_BYTES=524288 # cap for the attached set as a wh
 # is a startup error (the raise would achieve nothing); lowering only the payload cap below the
 # 131072 default clamps the untouched per-file default down to it, and the server still boots.
 # context_paths also caps at 50 files total — fixed, not env-configurable
+ANTI_TANGENT_TEST_EVIDENCE_MAX_BYTES=262144   # cap for a test_evidence_path file; the whole file goes to the reviewer vendor on every call
 
 # Output budgets + chunking (v0.1.4+):
 ANTI_TANGENT_PER_TASK_MAX_TOKENS=8192    # output cap for the per-task hooks (validate_task_spec / check_progress / validate_completion); default 8192; a truncated per-task review retries once at ANTI_TANGENT_MAX_TOKENS_CEILING when the caller passed no max_tokens_override AND this budget is below the ceiling — set it to the ceiling and there is nothing left to raise, so no retry happens
@@ -344,6 +345,7 @@ In addition to the existing `task_title` / `goal` / `acceptance_criteria` / `non
 In addition to `final_files` / `final_diff` / `final_diff_path` and other documented fields:
 
 - `task_kind`, `rung`, `plan_kind` and `boundary_rules` (optional, v0.28.0+, lightweight calls only): as for `validate_task_spec`. A lightweight experiment is rejected before review: experiments need a session. With boundary rules or on an experiment, a call that sends `final_files`, or records its change as kept, without a diff is rejected with `diff_required`.
+- `test_evidence_path` (optional, v0.28.0+): absolute path to a file the server reads as `test_evidence`, such as an eval scoreboard; mutually exclusive with `test_evidence`. Under `ANTI_TANGENT_PLAN_ROOTS` when set and within `ANTI_TANGENT_TEST_EVIDENCE_MAX_BYTES`; it does not count toward the payload cap. `extract_project_knowledge` envelopes take it too.
 - `context_paths` (optional, v0.25.0+): absolute paths to files the change does not touch, such as the package's existing helpers. The server reads them and shows the reviewer their contents, so the reviewer can report a helper the diff re-implements as an over-building `reuse:` instance — which needs a diff (`final_diff` or `final_diff_path`); with `final_files` alone the completion review makes no over-building finding. The reviewer is told they are never evidence for an acceptance criterion; the server cannot enforce what a model counts. Under `ANTI_TANGENT_PLAN_ROOTS` when it is set, at most 50 files, within `ANTI_TANGENT_CONTEXT_MAX_FILE_BYTES` and `ANTI_TANGENT_CONTEXT_MAX_PAYLOAD_BYTES`; they do not count toward the payload cap.
 
 The completion review walks every acceptance criterion and then reads the submitted change for defects of its own: a finding the evidence shows is reported as `correctness`, and a test that would not fail if the behaviour broke as `test_adequacy`. Either can be critical or major and so move the verdict. The reviewer sees only what the call submits, so a diff with little context limits what it can find.
