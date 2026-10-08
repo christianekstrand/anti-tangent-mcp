@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `boundary_violation` finding category, which no severity floor lowers: work a boundary rule forbids, and a fix on the wrong rung of an agent-network plan's fix ladder (`criterion: fix_ladder`). The server drops it from a call that sent no boundary rules, except a `fix_ladder` finding on an agent-network plan. Server-only categories: `diff_required` (major, a submission defect), and the minor notes `boundary_rules_missing`, `plan_kind_missing`, `kind_conflict`, `unknown_kind` and `rung_missing`, which are added after the verdict and never move it.
+
 ### Changed
 
 ## [0.27.0] - 2026-10-04
