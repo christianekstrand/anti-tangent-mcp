@@ -55,6 +55,10 @@ leave both empty.
 Severity: critical = unimplementable as written; major = implementer would
 still misimplement; minor = nit.
 
+{{if .BoundaryRules -}}
+**Boundary breaches.** For each task in the list above, check its acceptance criteria, steps and `Context:` against the boundary rules: report one that requires what a rule forbids at `severity: major`, in that task's findings.
+
+{{end -}}
 {{ if eq .Mode "quick" -}}
 **Quick mode.** For each task in the list above, surface only the most-severe findings — at most 3 per task. Omit minor nits and stylistic suggestions. Prefer fewer high-quality findings over many low-value ones.
 

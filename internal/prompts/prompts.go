@@ -116,6 +116,10 @@ type PreInput struct {
 	ContextFilesNonce string
 }
 
+// RigidityOn lets the shared plan_lean_rules partial ask a task-spec render
+// the same question it asks a plan render.
+func (in PreInput) RigidityOn() bool { return in.Spec.RigidityOn() }
+
 type MidInput struct {
 	Spec              session.TaskSpec
 	PriorFindings     []verdict.Finding
@@ -260,7 +264,20 @@ type PlanInput struct {
 	// per-call section, so the prefix it shares with the chunk prompts stays
 	// byte-identical.
 	PriorPlanFindings []verdict.Finding
+	// PlanKind is the plan's **Plan kind:** header, "agent-network" or "".
+	// BoundaryRules are the caller's boundary rules, rendered in the shared
+	// prefix. ExperimentTitles names the plan's experiment tasks, for the
+	// single-call prompt, which reviews every task.
+	PlanKind         string
+	BoundaryRules    []string
+	ExperimentTitles []string
 }
+
+// AgentNetwork reports whether the plan declared itself agent-network work.
+func (in PlanInput) AgentNetwork() bool { return in.PlanKind == planparser.PlanKindAgentNetwork }
+
+// RigidityOn reports whether over-building findings count rigidity.
+func (in PlanInput) RigidityOn() bool { return in.AgentNetwork() || len(in.BoundaryRules) > 0 }
 
 type KBIndexEntry struct {
 	Permalink string
@@ -582,6 +599,27 @@ type PlanChunkInput struct {
 	// ControllerVerifiedReferences name references the controller already
 	// checked against the codebase.
 	ControllerVerifiedReferences []string
+	// PlanKind and BoundaryRules: see PlanInput. They render in the shared
+	// prefix, so every call of one review must carry the same values.
+	PlanKind      string
+	BoundaryRules []string
+}
+
+// AgentNetwork reports whether the plan declared itself agent-network work.
+func (in PlanChunkInput) AgentNetwork() bool { return in.PlanKind == planparser.PlanKindAgentNetwork }
+
+// RigidityOn reports whether over-building findings count rigidity.
+func (in PlanChunkInput) RigidityOn() bool { return in.AgentNetwork() || len(in.BoundaryRules) > 0 }
+
+// ExperimentTitles names the chunk's experiment tasks.
+func (in PlanChunkInput) ExperimentTitles() []string {
+	var out []string
+	for _, t := range in.ChunkTasks {
+		if t.Kind == planparser.TaskKindExperiment {
+			out = append(out, t.Title)
+		}
+	}
+	return out
 }
 
 // RenderPlanTasksChunk produces a per-chunk prompt for the chunked validate_plan
@@ -716,8 +754,10 @@ func RenderExtract(in ExtractInput) (Output, error) {
 // not in the templates: a template cannot measure the value it interpolates.
 var templateFuncs = template.FuncMap{
 	"fence":      fence,
+	"fenceAll":   func(parts []string) string { return fence(parts...) },
 	"fenceFiles": fenceFiles,
 	"oneLine":    oneLine,
+	"inc":        func(i int) int { return i + 1 },
 }
 
 func render(name string, data any) (string, error) {
