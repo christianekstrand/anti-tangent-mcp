@@ -87,6 +87,10 @@ type PlanTask struct {
 	// Files are the paths the task's own Files: section lists. They are kept
 	// in memory only, so the ledger header never carries them.
 	Files []string `json:"-"`
+	// Kind and Rung are the task's **Kind:** and **Rung:** headers as the
+	// plan parser read them. In memory only, like Files.
+	Kind string `json:"-"`
+	Rung string `json:"-"`
 }
 
 // TaskRef is what a call says about the plan task it belongs to.
@@ -131,6 +135,11 @@ type Run struct {
 	// Revision counts the validate_plan rounds that reviewed this run's plan:
 	// 1 when the run is minted, one more for every later round that names it.
 	Revision int `json:"revision,omitempty"`
+	// PlanKind is the plan's **Plan kind:** header and BoundaryRules the
+	// boundary_rules the latest validate_plan round sent. In memory only:
+	// rules are caller text, and the ledger holds none.
+	PlanKind      string   `json:"-"`
+	BoundaryRules []string `json:"-"`
 	// review is the caller's record of the plan's latest complete review. The
 	// store never looks inside it and hands back the same value, so the caller
 	// must treat a stored value as immutable.
@@ -318,6 +327,59 @@ func (s *Store) TaskFiles(runID string, ref TaskRef) []string {
 	return nil
 }
 
+// AgentNetwork is what a plan run holds about one task's agent-network
+// declarations: the plan's kind and boundary rules, and the task's own kind
+// and rung, empty when the call names no task of the plan.
+type AgentNetwork struct {
+	PlanKind      string
+	BoundaryRules []string
+	TaskKind      string
+	Rung          string
+}
+
+// SetAgentNetwork stores the plan kind and boundary rules of the validate_plan
+// round that just settled run runID, replacing the previous round's. Returns
+// false when the run is unknown or expired.
+func (s *Store) SetAgentNetwork(runID, planKind string, rules []string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return false
+	}
+	r.PlanKind = planKind
+	r.BoundaryRules = append([]string(nil), rules...)
+	return true
+}
+
+// TaskAgentNetwork returns run runID's agent-network declarations for the
+// task ref names, found as TaskFiles finds it. ok is false when the run is
+// unknown or expired; a ref that names no plan task still returns the run's
+// plan kind and rules, with an empty TaskKind and Rung.
+func (s *Store) TaskAgentNetwork(runID string, ref TaskRef) (AgentNetwork, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return AgentNetwork{}, false
+	}
+	out := AgentNetwork{PlanKind: r.PlanKind, BoundaryRules: append([]string(nil), r.BoundaryRules...)}
+	if ref.empty() {
+		return out, true
+	}
+	index := ref.Index
+	if index < 1 || index > len(r.Tasks) {
+		index = r.taskByTitle(titleKey(ref.Title))
+	}
+	for _, t := range r.Tasks {
+		if t.Index == index {
+			out.TaskKind, out.Rung = t.Kind, t.Rung
+			break
+		}
+	}
+	return out, true
+}
+
 // PlanTaskCount returns how many tasks run runID's plan has, and false when
 // the run is unknown or expired.
 func (s *Store) PlanTaskCount(runID string) (int, bool) {
@@ -371,6 +433,7 @@ func (r *Run) snapshot() *Run {
 	}
 	cp.ConfiguredModels = cloneStringMap(r.ConfiguredModels)
 	cp.PlanCall = cloneCall(r.PlanCall)
+	cp.BoundaryRules = append([]string(nil), r.BoundaryRules...)
 	return &cp
 }
 
