@@ -354,9 +354,12 @@ func (s *Store) SetAgentNetwork(runID, planKind string, rules []string) bool {
 
 // TaskAgentNetwork returns run runID's agent-network declarations for the
 // task ref names, found as TaskFiles finds it. ok is false when the run is
-// unknown or expired; a ref that names no plan task still returns the run's
-// plan kind and rules, with an empty TaskKind and Rung.
+// unknown or expired, or the store is nil; a ref that names no plan task still
+// returns the run's plan kind and rules, with an empty TaskKind and Rung.
 func (s *Store) TaskAgentNetwork(runID string, ref TaskRef) (AgentNetwork, bool) {
+	if s == nil {
+		return AgentNetwork{}, false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.runs[runID]
@@ -371,6 +374,34 @@ func (s *Store) TaskAgentNetwork(runID string, ref TaskRef) (AgentNetwork, bool)
 	if index < 1 || index > len(r.Tasks) {
 		index = r.taskByTitle(titleKey(ref.Title))
 	}
+	for _, t := range r.Tasks {
+		if t.Index == index {
+			out.TaskKind, out.Rung = t.Kind, t.Rung
+			break
+		}
+	}
+	return out, true
+}
+
+// SessionAgentNetwork returns run runID's agent-network declarations for the
+// task session sessionID is attached to. ok is false when the run is unknown
+// or expired, the session is attached to none of its rows, or the store is
+// nil.
+func (s *Store) SessionAgentNetwork(runID, sessionID string) (AgentNetwork, bool) {
+	if s == nil {
+		return AgentNetwork{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return AgentNetwork{}, false
+	}
+	index, ok := r.sessions[sessionID]
+	if !ok {
+		return AgentNetwork{}, false
+	}
+	out := AgentNetwork{PlanKind: r.PlanKind, BoundaryRules: append([]string(nil), r.BoundaryRules...)}
 	for _, t := range r.Tasks {
 		if t.Index == index {
 			out.TaskKind, out.Rung = t.Kind, t.Rung

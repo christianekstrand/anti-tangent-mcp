@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/patiently/anti-tangent-mcp/internal/planparser"
+	"github.com/patiently/anti-tangent-mcp/internal/planrun"
+	"github.com/patiently/anti-tangent-mcp/internal/session"
 	"github.com/patiently/anti-tangent-mcp/internal/verdict"
 )
 
@@ -176,4 +178,217 @@ func planKindMissingNote() verdict.Finding {
 	return agentNote(verdict.CategoryPlanKindMissing, "plan_kind",
 		"This call sent boundary_rules for work with no plan kind. The rules are checked, but the determinism, rate, experiment and fix-ladder checks stay off.",
 		"If this is agent-network work, add `**Plan kind:** agent-network` above the plan's first task heading, or pass plan_kind.")
+}
+
+// agentNetworkArgs are a per-task call's agent-network declarations, as sent
+// or as resolved against its plan run. TaskKind "" means a build task.
+type agentNetworkArgs struct {
+	TaskKind      string
+	Rung          string
+	PlanKind      string
+	BoundaryRules []string
+}
+
+// normalizeAgentNetworkArgs trims and lower-cases the declared kinds and
+// bounds boundary_rules. An unknown kind or rung is dropped and noted; only
+// the rules' limits are argument errors.
+func normalizeAgentNetworkArgs(in agentNetworkArgs) (agentNetworkArgs, []verdict.Finding, error) {
+	rules, err := normalizeBoundaryRules(in.BoundaryRules)
+	if err != nil {
+		return agentNetworkArgs{}, nil, err
+	}
+	out := agentNetworkArgs{BoundaryRules: rules}
+	var notes []verdict.Finding
+	switch v := strings.ToLower(strings.TrimSpace(in.TaskKind)); v {
+	case "", planparser.TaskKindBuild, planparser.TaskKindExperiment:
+		out.TaskKind = v
+	default:
+		notes = append(notes, unknownArgNote("task_kind", v, "experiment or build"))
+	}
+	switch v := strings.ToLower(strings.TrimSpace(in.PlanKind)); v {
+	case "", planparser.PlanKindAgentNetwork:
+		out.PlanKind = v
+	default:
+		notes = append(notes, unknownArgNote("plan_kind", v, planparser.PlanKindAgentNetwork))
+	}
+	if v := strings.ToLower(strings.TrimSpace(in.Rung)); v == "" || planparser.IsRung(v) {
+		out.Rung = v
+	} else {
+		notes = append(notes, unknownArgNote("rung", v, "one of "+strings.Join(planparser.Rungs, ", ")))
+	}
+	return out, notes, nil
+}
+
+// resolveAgentNetwork decides a per-task call's mode. A call attached to a
+// plan run takes the run's plan kind, and the task's kind and rung when the
+// run's plan has the task; a declaration the call sent that differs is
+// ignored and noted. Boundary rules the call sends are its own, and a call
+// that sends none takes the run's. A call attached to no run keeps its own.
+func resolveAgentNetwork(args agentNetworkArgs, stored planrun.AgentNetwork, attached bool, runID string) (agentNetworkArgs, []verdict.Finding) {
+	if !attached {
+		return args, nil
+	}
+	out := args
+	var notes []verdict.Finding
+	conflict := func(field, sent, kept string) {
+		if sent != "" && sent != kept {
+			notes = append(notes, kindConflictNote(field, sent, kept, runID))
+		}
+	}
+	conflict("plan_kind", args.PlanKind, stored.PlanKind)
+	out.PlanKind = stored.PlanKind
+	if stored.TaskKind != "" {
+		conflict("task_kind", args.TaskKind, stored.TaskKind)
+		conflict("rung", args.Rung, stored.Rung)
+		out.TaskKind, out.Rung = stored.TaskKind, stored.Rung
+	}
+	if len(out.BoundaryRules) == 0 {
+		out.BoundaryRules = stored.BoundaryRules
+	}
+	return out, notes
+}
+
+// modeNotes returns the notes a resolved per-task mode draws: an experiment
+// with no rung, an agent-network task without rules, and rules without a plan
+// kind.
+func modeNotes(m agentNetworkArgs) []verdict.Finding {
+	var out []verdict.Finding
+	if m.TaskKind == planparser.TaskKindExperiment && m.Rung == "" {
+		out = append(out, rungMissingNote())
+	}
+	return append(out, declarationNotes(m.PlanKind, "", len(m.BoundaryRules) > 0)...)
+}
+
+func (m agentNetworkArgs) applyTo(spec *session.TaskSpec) {
+	spec.TaskKind, spec.Rung, spec.PlanKind, spec.BoundaryRules = m.TaskKind, m.Rung, m.PlanKind, m.BoundaryRules
+}
+
+// sessionSpec returns the session's task spec with the task kind, rung and
+// plan kind its plan run records now, so a plan revised after the task
+// started is reviewed in its new mode. Boundary rules stay as the task's
+// validate_task_spec call resolved them.
+func (h *handlers) sessionSpec(sess *session.Session) session.TaskSpec {
+	spec := sess.Spec
+	if sess.PlanRunID == "" {
+		return spec
+	}
+	stored, ok := h.deps.PlanRuns.SessionAgentNetwork(sess.PlanRunID, sess.ID)
+	if !ok {
+		return spec
+	}
+	spec.PlanKind = stored.PlanKind
+	if stored.TaskKind != "" {
+		spec.TaskKind, spec.Rung = stored.TaskKind, stored.Rung
+	}
+	return spec
+}
+
+// capProgressBoundaryViolations lowers every boundary_violation to minor.
+// check_progress sees whole files and no diff, so it cannot tell code the
+// task added from code that was already there.
+func capProgressBoundaryViolations(fs []verdict.Finding) []verdict.Finding {
+	for i := range fs {
+		if fs[i].Category == verdict.CategoryBoundaryViolation {
+			fs[i].Severity = verdict.SeverityMinor
+		}
+	}
+	return fs
+}
+
+// agentRejection returns the finding that rejects a validate_completion before
+// review for an agent-network reason, and false when none applies: an
+// experiment needs a session, and a boundary-checked or experiment task that
+// sends files must also send a diff, since the boundary check reads only the
+// lines a diff adds.
+func agentRejection(spec session.TaskSpec, lightweight bool, finalDiff string, files []FileArg) (verdict.Finding, string, bool) {
+	if lightweight && spec.Experiment() {
+		return verdict.Finding{
+			Severity:   verdict.SeverityMajor,
+			Category:   verdict.CategoryInsufficientEvidence,
+			Criterion:  "session",
+			Evidence:   "experiment tasks need a session; call validate_task_spec first",
+			Suggestion: "Call validate_task_spec for this task, then validate_completion with the session_id it returns.",
+		}, "Call validate_task_spec for this experiment task, then call validate_completion with its session_id.", true
+	}
+	if finalDiff == "" && len(files) > 0 && (len(spec.BoundaryRules) > 0 || spec.Experiment()) {
+		return diffRequiredFinding(), "Re-submit with final_diff or final_diff_path: the boundary check runs on the lines the diff adds.", true
+	}
+	return verdict.Finding{}, "", false
+}
+
+func diffRequiredFinding() verdict.Finding {
+	return verdict.Finding{
+		Severity:   verdict.SeverityMajor,
+		Category:   verdict.CategoryDiffRequired,
+		Criterion:  "final_diff",
+		Evidence:   "the boundary check needs a diff: it judges only the lines a change adds, and whole files do not show which those are",
+		Suggestion: "Send final_diff or final_diff_path with the task's change.",
+	}
+}
+
+// agentRejectionEnvelope is validate_completion's answer to a call
+// agentRejection refuses. No reviewer call is made and no session is written.
+func agentRejectionEnvelope(sessionID, modelUsed string, lightweight bool, f verdict.Finding, nextAction string) Envelope {
+	res := verdict.FinalizeVerdict(verdict.Result{Findings: []verdict.Finding{f}, NextAction: nextAction})
+	return Envelope{
+		Tool:                 "validate_completion",
+		SessionID:            sessionID,
+		Verdict:              string(res.Verdict),
+		Findings:             res.Findings,
+		NextAction:           res.NextAction,
+		ModelUsed:            modelUsed,
+		Lightweight:          lightweight,
+		SubmissionDefectOnly: isSubmissionDefectOnly(res.Findings),
+	}
+}
+
+func unknownArgNote(field, v, accepts string) verdict.Finding {
+	return agentNote(verdict.CategoryUnknownKind, field,
+		fmt.Sprintf("%s %s is not a value anti-tangent knows, so it is ignored.", field, quoteValue(v)),
+		fmt.Sprintf("%s takes %s.", field, accepts))
+}
+
+func kindConflictNote(field, sent, kept, runID string) verdict.Finding {
+	if kept == "" {
+		kept = "none"
+	}
+	return agentNote(verdict.CategoryKindConflict, field,
+		fmt.Sprintf("This call sent %s %s, but plan run %s records %s for this task; the run's value is used.", field, quoteValue(sent), runID, quoteValue(kept)),
+		"Pass the value validate_plan returned for this task, or change the plan and run validate_plan again.")
+}
+
+// taskSpecAgentNetwork resolves a validate_task_spec call's mode against the
+// plan run it attaches to: the run it names, or the one its title finds.
+func (h *handlers) taskSpecAgentNetwork(args ValidateTaskSpecArgs) (agentNetworkArgs, []verdict.Finding, error) {
+	sent, notes, err := normalizeAgentNetworkArgs(agentNetworkArgs{
+		TaskKind: args.TaskKind, Rung: args.Rung, PlanKind: args.PlanKind, BoundaryRules: args.BoundaryRules,
+	})
+	if err != nil {
+		return agentNetworkArgs{}, nil, err
+	}
+	runID, byTitle := h.taskSpecPlanRun(args, false)
+	ref := planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle}
+	if byTitle {
+		ref.Index = 0
+	}
+	stored, attached := h.deps.PlanRuns.TaskAgentNetwork(runID, ref)
+	mode, conflicts := resolveAgentNetwork(sent, stored, attached, runID)
+	notes = append(notes, conflicts...)
+	return mode, append(notes, modeNotes(mode)...), nil
+}
+
+// lightweightAgentNetwork resolves a lightweight validate_completion's mode
+// against the plan run its plan_run_id names.
+func (h *handlers) lightweightAgentNetwork(args ValidateCompletionArgs) (agentNetworkArgs, []verdict.Finding, error) {
+	sent, notes, err := normalizeAgentNetworkArgs(agentNetworkArgs{
+		TaskKind: args.TaskKind, Rung: args.Rung, PlanKind: args.PlanKind, BoundaryRules: args.BoundaryRules,
+	})
+	if err != nil {
+		return agentNetworkArgs{}, nil, err
+	}
+	runID := strings.TrimSpace(args.PlanRunID)
+	stored, attached := h.deps.PlanRuns.TaskAgentNetwork(runID, planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle})
+	mode, conflicts := resolveAgentNetwork(sent, stored, attached, runID)
+	notes = append(notes, conflicts...)
+	return mode, append(notes, modeNotes(mode)...), nil
 }

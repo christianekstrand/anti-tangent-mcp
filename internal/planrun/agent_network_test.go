@@ -87,3 +87,29 @@ func TestLedgerHeader_CarriesNoAgentNetworkFields(t *testing.T) {
 	require.NotContains(t, string(b), "experiment")
 	require.NotContains(t, string(b), "agent-network")
 }
+
+func TestSessionAgentNetwork_FollowsTheRowAndARevision(t *testing.T) {
+	s := NewStore(time.Hour)
+	run := agentNetworkRun(t, s)
+	require.True(t, s.SetAgentNetwork(run.ID, "agent-network", nil))
+	_, ok := s.Attach(run.ID, "sess-1", TaskRef{Index: 2}, "pass")
+	require.True(t, ok)
+
+	got, ok := s.SessionAgentNetwork(run.ID, "sess-1")
+	require.True(t, ok)
+	require.Equal(t, "experiment", got.TaskKind)
+
+	_, ok = s.Revise(run.ID, "pass", "rigorous", []PlanTask{
+		{Index: 1, Title: "Task 1: Mapper", Kind: "build"},
+		{Index: 2, Title: "Task 2: Zip prompt", Kind: "build"},
+	}, nil)
+	require.True(t, ok)
+	got, ok = s.SessionAgentNetwork(run.ID, "sess-1")
+	require.True(t, ok)
+	require.Equal(t, "build", got.TaskKind, "a revised plan's kinds take effect at once")
+
+	_, ok = s.SessionAgentNetwork(run.ID, "sess-unknown")
+	require.False(t, ok)
+	_, ok = s.SessionAgentNetwork("pr_unknown", "sess-1")
+	require.False(t, ok)
+}
