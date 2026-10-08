@@ -62,3 +62,14 @@ func TestSchemas_ListBoundaryViolation(t *testing.T) {
 		require.Contains(t, string(s), `"boundary_violation"`)
 	}
 }
+
+func TestParsePlan_ClearsServerSetKinds(t *testing.T) {
+	raw := []byte(`{"plan_verdict":"pass","plan_quality":"rigorous","plan_findings":[],"tasks":[` +
+		`{"task_index":1,"task_title":"Task 1: x","verdict":"pass","findings":[],"suggested_header_block":"","suggested_header_reason":"",` +
+		`"task_kind":"build","rung":"prompt","plan_kind":"agent-network"}],"next_action":"go"}`)
+	pr, err := ParsePlan(raw)
+	require.NoError(t, err)
+	require.Empty(t, pr.Tasks[0].TaskKind, "a reviewer cannot set the task kind: the plan's own header decides it")
+	require.Empty(t, pr.Tasks[0].Rung)
+	require.Empty(t, pr.Tasks[0].PlanKind)
+}

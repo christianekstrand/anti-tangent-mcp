@@ -231,6 +231,7 @@ func TestToolInputSchemas_StatedLimitsMatchConstants(t *testing.T) {
 		"validate_plan.controller_rulings":                          {n(maxControllerRulingEntries), n(maxControllerRulingChars)},
 		"validate_plan.controller_rulings[].ruling":                 {n(maxControllerRulingChars)},
 		"validate_plan.controller_verified_references":              verifiedRefs,
+		"validate_plan.boundary_rules":                              {n(maxBoundaryRules), n(maxBoundaryRuleChars)},
 	}
 	for path, wants := range cases {
 		desc, ok := descs[path]

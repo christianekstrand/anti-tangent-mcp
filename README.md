@@ -321,6 +321,8 @@ Task-level `unverifiable_codebase_claim` findings leave the findings and are ret
 
 As of v0.4.0, `validate_plan` task results may include `lightweight_eligible` and `lightweight_reason`. These are advisory controller hints for trivial mechanical tasks that may use the lightweight protocol; they do not change the server-side lifecycle hooks.
 
+**Agent-network mode (v0.28.0+).** A plan that declares `**Plan kind:** agent-network` above its first task, and tasks that declare `**Kind:** experiment` and `**Rung:** <rung>`, are reviewed for work that belongs to the model rather than to code: a criterion demanding that model behaviour hold in every run, an experiment without a measured keep-or-revert protocol, and a fix on the wrong rung of the fix ladder. `validate_plan` accepts `boundary_rules` (at most 20 entries of at most 1000 characters): your project's rules for what code may do with reply and user text, which the reviewer checks every task against, reporting a breach as `boundary_violation`. Each task result carries the server-set `task_kind`, `rung` and `plan_kind`, and an experiment is never `lightweight_eligible`. The plan run stores the kinds and the rules, so the per-task calls attached to it review in the same mode. Format and worked example: [`docs/protocol/authoring.md`](docs/protocol/authoring.md) §3.11.
+
 Identical passing `validate_plan` calls are cached in memory for 3 minutes. The cache identity includes the rendered prompt, model, mode, and token budget; cache hits return `review_ms: 0` and preserve the original `next_action` behind a `[cached <=3m]` prefix.
 
 ### `validate_task_spec` arguments

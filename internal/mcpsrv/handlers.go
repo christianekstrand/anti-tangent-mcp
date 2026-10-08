@@ -1209,6 +1209,7 @@ type ValidatePlanArgs struct {
 	ControllerRulings            []ControllerRulingArg `json:"controller_rulings,omitempty" jsonschema:"Rulings you made on findings from earlier rounds, resent every round. Each waives every finding with the same id, ignoring any -n suffix; only an id's shape is checked. At most 50 entries of at most 2000 characters each."`
 	PlanRunID                    string                `json:"plan_run_id,omitempty" jsonschema:"The plan_run_id an earlier validate_plan round on this plan returned. The round then keeps that id, sends the reviewer only the tasks whose text changed, carries the other tasks' results forward, and re-runs the plan-level pass only when the plan text changed. A round in which nothing changed makes no reviewer call. An unknown or expired id does not fail the call: the whole plan is reviewed under a new run, unless the pass cache holds an identical passing result from the last three minutes, and a finding says so. Leave it out to review the whole plan, unless the pass cache holds an identical passing result from the last three minutes."`
 	ControllerVerifiedReferences []string              `json:"controller_verified_references,omitempty" jsonschema:"Paths, symbols, line anchors or commands you already verified; a matching unverifiable_codebase_claim finding is suppressed by substring match before the rolled-up checklist is built. At most 200 entries of at most 500 characters each."`
+	BoundaryRules                []string              `json:"boundary_rules,omitempty" jsonschema:"Your project's rules for what code may do with reply and user text, such as no regex over a reply. The reviewer reports a task that requires what a rule forbids as boundary_violation, major. Stored on the plan run, so a per-task call attached to it that sends none uses these. At most 20 entries of at most 1000 characters each."`
 }
 
 func validatePlanTool() *mcp.Tool {
@@ -2251,6 +2252,11 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		logOutcome = "validation_error"
 		return nil, verdict.PlanResult{}, err
 	}
+	boundaryRules, err := normalizeBoundaryRules(args.BoundaryRules)
+	if err != nil {
+		logOutcome = "validation_error"
+		return nil, verdict.PlanResult{}, err
+	}
 	rulings, malformedRulingIDs := planRulings(rulingArgs)
 
 	maxTokens, clamp, err := effectiveMaxTokens(args.MaxTokensOverride, h.deps.Cfg.PlanMaxTokens, h.deps.Cfg.MaxTokensCeiling)
@@ -2389,11 +2395,14 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		logOutcome = "model_error"
 		return nil, verdict.PlanResult{}, err
 	}
+	planKind, unknownPlanKind := planparser.PlanKind(preamble)
 	round := h.newPlanRound(strings.TrimSpace(args.PlanRunID), preamble, tasks, planInputs{
 		ProjectKnowledge: projectKnowledge,
 		Mode:             args.Mode,
 		Model:            model.String(),
 		ContextFiles:     contextSources(contextFiles),
+		PlanKind:         planKind,
+		BoundaryRules:    boundaryRules,
 	})
 	renderInputs := renderPlanReviewInputs{
 		PlanText:                     planText,
@@ -2404,6 +2413,8 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		ContextFiles:                 toPromptContextFiles(contextFiles),
 		ControllerRulings:            rulingsForPrompt(rulings),
 		ControllerVerifiedReferences: verifiedRefs,
+		PlanKind:                     planKind,
+		BoundaryRules:                boundaryRules,
 	}
 	// A round on a known run renders only what it must review; any other call
 	// renders the whole plan.
@@ -2483,6 +2494,9 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 			ContextFiles:       contextSources(contextFiles),
 			Tasks:              tasks,
 			MalformedRulingIDs: malformedRulingIDs,
+			PlanKind:           planKind,
+			UnknownPlanKind:    unknownPlanKind,
+			BoundaryRules:      boundaryRules,
 		}
 		cachedCall.finish(&cached)
 		cachedMeta := cachedCall.meta()
@@ -2558,6 +2572,9 @@ func (h *handlers) ValidatePlan(ctx context.Context, _ *mcp.CallToolRequest, arg
 		Rulings:            rulings,
 		VerifiedReferences: verifiedRefs,
 		MalformedRulingIDs: malformedRulingIDs,
+		PlanKind:           planKind,
+		UnknownPlanKind:    unknownPlanKind,
+		BoundaryRules:      boundaryRules,
 	}
 	if r, p, handled, herr := h.handlePlanReviewErr(planReviewErrInputs{
 		Err:        err,
@@ -2714,6 +2731,20 @@ type renderPlanReviewInputs struct {
 	ContextFiles                 []prompts.ContextFile
 	ControllerRulings            []session.Ruling
 	ControllerVerifiedReferences []string
+	PlanKind                     string
+	BoundaryRules                []string
+}
+
+// experimentTitles names the plan's experiment tasks, for the single-call
+// plan prompt.
+func experimentTitles(tasks []planparser.RawTask) []string {
+	var out []string
+	for _, t := range tasks {
+		if t.Kind == planparser.TaskKindExperiment {
+			out = append(out, t.Title)
+		}
+	}
+	return out
 }
 
 func renderPlanReview(in renderPlanReviewInputs) (renderedPlanReview, error) {
@@ -2747,6 +2778,9 @@ func renderPlanReview(in renderPlanReviewInputs) (renderedPlanReview, error) {
 			ContextFilesNonce:            contextFilesNonce,
 			ControllerRulings:            in.ControllerRulings,
 			ControllerVerifiedReferences: in.ControllerVerifiedReferences,
+			PlanKind:                     in.PlanKind,
+			BoundaryRules:                in.BoundaryRules,
+			ExperimentTitles:             experimentTitles(in.Tasks),
 		})
 		if err != nil {
 			return renderedPlanReview{}, fmt.Errorf("render plan prompt: %w", err)
@@ -2764,6 +2798,8 @@ func renderPlanReview(in renderPlanReviewInputs) (renderedPlanReview, error) {
 		ContextFilesNonce:            contextFilesNonce,
 		ControllerRulings:            in.ControllerRulings,
 		ControllerVerifiedReferences: in.ControllerVerifiedReferences,
+		PlanKind:                     in.PlanKind,
+		BoundaryRules:                in.BoundaryRules,
 	})
 	if err != nil {
 		return renderedPlanReview{}, fmt.Errorf("render plan_findings_only: %w", err)
@@ -2784,6 +2820,8 @@ func renderPlanReview(in renderPlanReviewInputs) (renderedPlanReview, error) {
 			ContextFilesNonce:            contextFilesNonce,
 			ControllerRulings:            in.ControllerRulings,
 			ControllerVerifiedReferences: in.ControllerVerifiedReferences,
+			PlanKind:                     in.PlanKind,
+			BoundaryRules:                in.BoundaryRules,
 		})
 		if err != nil {
 			return renderedPlanReview{}, fmt.Errorf("render plan_tasks_chunk: %w", err)
