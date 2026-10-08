@@ -66,6 +66,14 @@ If the task's plan text or context contains `.trimIndent()`, `.trimMargin()`, `t
   - evidence: "<quoted trim construct and the multi-line literal>"
   - suggestion: "Pin example strings the implementation will compare against to a single source line, OR phrase the AC against the rendered string (e.g. 'output contains <phrase>') rather than against source layout."
 
+### Determinism demands
+
+This task is a build task of an agent-network plan.
+
+An acceptance criterion that demands that model behaviour holds in every run — "100%", "always", "never", "every run", or one passing run offered as proof — asks for what a model cannot give, and pushes the implementer toward rigid code. Report it as `category: ambiguous_spec`, `criterion: determinism_demand`, `severity: major`, quoting the criterion in `evidence`. In `suggestion`, either rewrite it as a rate — a named eval, n of at least 10, a threshold and a baseline — or, when it guards a commitment code can check from structured data (a consent stamp, a submission, eligibility, verbatim legal text), move it to a deterministic code check, where 100% is correct.
+
+Not a determinism demand: a safety invariant checked deterministically from structured state; verbatim legal text; any criterion of a build task about code output or structured state. An agent-network plan also has deterministic tasks — mappers, a consent recognizer, harness code — and "never" and "100%" are right there.
+
 ### Over-building
 
 Plans — and the single task specs drawn from them — over-build in six ways. Report each as `category: quality`, `criterion: over_building`, always `severity: minor`, tagging every instance with one of these words:
@@ -80,6 +88,8 @@ Plans — and the single task specs drawn from them — over-build in six ways. 
 Never flag: validation at trust boundaries, error handling that prevents data loss, security measures, accessibility basics, tests an acceptance criterion calls for, normative test bodies, or anything the plan's or the task's Goal explicitly asks for. A structure the task's `Context:` justifies — a second implementation named in a later task, a dependency chosen for edge cases the standard library mishandles, a decision quoted from Project knowledge — is deliberate and draws no finding.
 
 Emit at most ONE `over_building` finding per task, in that task's findings (for a single task spec, one finding in all). `evidence` lists every instance on its own line as `<tag>: <what>. <replacement>.`; `suggestion` is the rewritten acceptance criterion or step, or the `Context:` line to add when the structure is deliberate.
+
+This is agent-network work, so over-building has one more tag, `rigidity:`, for each instance a task mandates of: a veto key; a state or turn marker; an outbound string literal; a comparison, search, tokenisation, or length or shape test whose operand is reply or user text. Count only what no `boundary_violation` finding already reports. List each instance in that task's `over_building` finding, and end its `evidence` with `rigidity: +N`.
 
 This finding is minor because that is the severity it is worth, not because it is discretionary: an instruction elsewhere in this prompt to surface only the most-severe findings or to omit minor ones does not reach it. Emit it in addition to any such cap.
 

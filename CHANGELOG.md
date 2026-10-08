@@ -10,8 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `boundary_violation` finding category, which no severity floor lowers: work a boundary rule forbids, and a fix on the wrong rung of an agent-network plan's fix ladder (`criterion: fix_ladder`). The server drops it from a call that sent no boundary rules, except a `fix_ladder` finding on an agent-network plan. Server-only categories: `diff_required` (major, a submission defect), and the minor notes `boundary_rules_missing`, `plan_kind_missing`, `kind_conflict`, `unknown_kind` and `rung_missing`, which are added after the verdict and never move it.
+- Agent-network sections in the task and plan prompts, each rendered only when the plan kind, the task kind or boundary rules call for it, so a call that uses none renders as before: the boundary rules with the rule that a match is any test whose operand is reply or user text; determinism demands on model behaviour (`criterion: determinism_demand`); an experiment's measured keep-or-revert protocol at task start (`criterion: experiment_protocol`); rates as evidence and the experiment's outcome at completion, where a revert that follows the stated rule meets the task; the fix ladder; and a `rigidity:` tag under over-building.
 
 ### Changed
+
+- The pre-task review tells the reviewer never to propose a string or regex assertion over model-written text as the testable form of an acceptance criterion. This line renders on every `validate_task_spec` call.
 
 ## [0.27.0] - 2026-10-04
 

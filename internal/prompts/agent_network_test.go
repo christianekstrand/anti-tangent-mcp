@@ -102,3 +102,91 @@ func TestRigidityTag_OnlyInAgentNetworkOrRulesMode(t *testing.T) {
 		}
 	}
 }
+
+func experimentSpec() session.TaskSpec {
+	s := sampleSpec()
+	s.Title = "Ask for a missing ZIP"
+	s.Goal = "The bot asks for a missing ZIP more often"
+	s.AcceptanceCriteria = []string{
+		"evals/core/zip-missing.yaml: after-rate >= 8/10 at n=10, baseline 5/10",
+		"keep only if the after-rate meets the threshold and the suite shows no regression; otherwise revert",
+	}
+	s.TaskKind = planparser.TaskKindExperiment
+	s.Rung = "prompt"
+	s.PlanKind = planparser.PlanKindAgentNetwork
+	return s
+}
+
+func agentNetworkBuildSpec() session.TaskSpec {
+	s := sampleSpec()
+	s.TaskKind = planparser.TaskKindBuild
+	s.PlanKind = planparser.PlanKindAgentNetwork
+	return s
+}
+
+func TestRenderPre_Experiment_Golden(t *testing.T) {
+	out, err := RenderPre(PreInput{Spec: experimentSpec()})
+	require.NoError(t, err)
+	golden(t, "pre_experiment", out.System+"\n---USER---\n"+out.User)
+}
+
+func TestRenderPre_AgentNetworkBuild_Golden(t *testing.T) {
+	out, err := RenderPre(PreInput{Spec: agentNetworkBuildSpec()})
+	require.NoError(t, err)
+	golden(t, "pre_agent_network_build", out.System+"\n---USER---\n"+out.User)
+}
+
+func TestRenderMid_AgentNetwork_Golden(t *testing.T) {
+	out, err := RenderMid(MidInput{Spec: experimentSpec(), WorkingOn: "rewording the ZIP prompt"})
+	require.NoError(t, err)
+	golden(t, "mid_agent_network", out.System+"\n---USER---\n"+out.User)
+}
+
+func TestRenderPost_Experiment_Golden(t *testing.T) {
+	out, err := RenderPost(PostInput{
+		Spec:         experimentSpec(),
+		Summary:      "Measured 5/10 before and 7/10 after at n=10; below the 8/10 threshold, so reverted.",
+		TestEvidence: "zip-missing: before 5/10, after 7/10 (n=10)\nsuite: 42 evals, 0 regressions\n",
+	})
+	require.NoError(t, err)
+	golden(t, "post_experiment", out.System+"\n---USER---\n"+out.User)
+}
+
+func TestRenderPost_AgentNetworkBuild_Golden(t *testing.T) {
+	out, err := RenderPost(PostInput{Spec: agentNetworkBuildSpec(), Summary: "s", FinalDiff: "+x\n"})
+	require.NoError(t, err)
+	golden(t, "post_agent_network_build", out.System+"\n---USER---\n"+out.User)
+}
+
+func TestRenderPlanChunked_AgentNetwork_Golden(t *testing.T) {
+	findingsOnly, err := RenderPlanFindingsOnly(PlanInput{PlanText: agentNetworkPlan, PlanKind: planparser.PlanKindAgentNetwork})
+	require.NoError(t, err)
+	chunk, err := RenderPlanTasksChunk(PlanChunkInput{PlanText: agentNetworkPlan, ChunkTasks: agentNetworkTasks(t), PlanKind: planparser.PlanKindAgentNetwork})
+	require.NoError(t, err)
+	require.Equal(t, findingsOnly.UserPrefix, chunk.UserPrefix)
+	golden(t, "plan_findings_only_agent_network", findingsOnly.System+"\n---USER---\n"+findingsOnly.User)
+	golden(t, "plan_tasks_chunk_agent_network", chunk.System+"\n---USER---\n"+chunk.User)
+}
+
+func TestRenderPlan_ExperimentWithoutAgentNetworkPlan(t *testing.T) {
+	out, err := RenderPlan(PlanInput{PlanText: "### Task 1: x\n\n**Kind:** experiment\n", ExperimentTitles: []string{"Task 1: x"}})
+	require.NoError(t, err)
+	require.Contains(t, out.User, "Apply this to the experiment tasks named below.")
+	require.Contains(t, out.User, "**Experiment protocol.** These tasks of the plan are experiments:\n- Task 1: x\n")
+	require.NotContains(t, out.User, "### Fix ladder", "the fix ladder is for agent-network plans only")
+	require.NotContains(t, out.User, "`rigidity:`")
+}
+
+func TestAgentModeSections_AbsentByDefault(t *testing.T) {
+	pre, err := RenderPre(PreInput{Spec: sampleSpec()})
+	require.NoError(t, err)
+	post, err := RenderPost(PostInput{Spec: sampleSpec(), Summary: "s", FinalDiff: "+x\n"})
+	require.NoError(t, err)
+	plan, err := RenderPlan(PlanInput{PlanText: "### Task 1: x\n"})
+	require.NoError(t, err)
+	for _, body := range []string{pre.User, post.User, plan.User} {
+		for _, marker := range []string{"determinism_demand", "experiment_protocol", "### Fix ladder", "### Rates as evidence", "### Experiment outcome", "## Boundary rules"} {
+			require.NotContains(t, body, marker)
+		}
+	}
+}
