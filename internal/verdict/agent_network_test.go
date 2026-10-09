@@ -45,7 +45,7 @@ func TestParsePlanFindingsOnly_AcceptsBoundaryViolation(t *testing.T) {
 func TestParse_AgentNetworkServerCategories_RejectedFromReviewerOutput(t *testing.T) {
 	for _, cat := range []Category{
 		CategoryBoundaryRulesMissing, CategoryPlanKindMissing, CategoryKindConflict,
-		CategoryUnknownKind, CategoryRungMissing, CategoryDiffRequired,
+		CategoryUnknownKind, CategoryRungMissing, CategoryDiffRequired, CategoryBoundaryUnchecked,
 	} {
 		raw := []byte(`{"verdict":"warn","findings":[{"severity":"minor","category":"` + string(cat) +
 			`","criterion":"c","evidence":"e","suggestion":"s","same_as":null}],"next_action":"x"}`)

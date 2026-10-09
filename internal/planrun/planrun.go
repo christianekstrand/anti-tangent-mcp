@@ -63,6 +63,10 @@ type TaskRow struct {
 	// Unmatched marks a row that named no plan task, by index or by title. It
 	// is numbered after the plan's tasks.
 	Unmatched bool `json:"unmatched,omitempty"`
+	// heading is the plan heading of the task the row was matched to, kept
+	// apart from TaskTitle because a caller's title may paraphrase it. It is
+	// what finds the row's task again after a revision renumbers the plan.
+	heading string
 	// Calls logs every anti-tangent call made for this task, oldest first,
 	// capped by AppendCall.
 	Calls        []ToolCall `json:"calls,omitempty"`
@@ -411,9 +415,14 @@ func (s *Store) SessionAgentNetwork(runID, sessionID string) (AgentNetwork, bool
 		return AgentNetwork{}, false
 	}
 	// A revision can renumber tasks while attached rows keep their Index, so
-	// the row's title finds the task first and its position is the fallback.
+	// the row's plan heading, else its title, finds the task first and its
+	// position is the fallback.
 	if pos := r.rowPos(index); pos >= 0 {
-		if byTitle := r.taskByTitle(titleKey(r.Rows[pos].TaskTitle)); byTitle != 0 {
+		key := titleKey(r.Rows[pos].heading)
+		if key == "" {
+			key = titleKey(r.Rows[pos].TaskTitle)
+		}
+		if byTitle := r.taskByTitle(key); byTitle != 0 {
 			index = byTitle
 		}
 	}
@@ -649,17 +658,20 @@ func (s *Store) UpsertLite(runID string, ref TaskRef, mutate func(*TaskRow)) (Ta
 // task has none. A new row takes the plan's heading when ref carries no title.
 func (r *Run) rowFor(ref TaskRef, lite bool) int {
 	pos, index, unmatched := r.resolve(ref)
-	if pos >= 0 {
-		return pos
+	if pos < 0 {
+		title := ref.Title
+		if strings.TrimSpace(title) == "" {
+			title = r.taskTitle(index)
+		}
+		pos = r.insertRow(TaskRow{
+			Index: index, TaskTitle: title, Unmatched: unmatched, Lite: lite,
+			CodesceneState: StateMissing,
+		})
 	}
-	title := ref.Title
-	if strings.TrimSpace(title) == "" {
-		title = r.taskTitle(index)
+	if row := &r.Rows[pos]; row.heading == "" && !row.Unmatched {
+		row.heading = r.taskTitle(row.Index)
 	}
-	return r.insertRow(TaskRow{
-		Index: index, TaskTitle: title, Unmatched: unmatched, Lite: lite,
-		CodesceneState: StateMissing,
-	})
+	return pos
 }
 
 // resolve finds the row ref names: by ref.Index when it is one of the plan's

@@ -336,6 +336,19 @@ func agentRejection(spec session.TaskSpec, lightweight bool, finalDiff string, f
 	return verdict.Finding{}, "", false
 }
 
+// boundaryUncheckedNote returns the note for a build task's completion that
+// carries boundary rules but neither a diff nor files: the boundary check
+// reads only added lines, so it checked nothing. A reverted experiment is
+// exempt because it leaves no code to check.
+func boundaryUncheckedNote(spec session.TaskSpec, finalDiff string, files []FileArg) (verdict.Finding, bool) {
+	if finalDiff != "" || len(files) > 0 || len(spec.BoundaryRules) == 0 || spec.Experiment() {
+		return verdict.Finding{}, false
+	}
+	return agentNote(verdict.CategoryBoundaryUnchecked, "final_diff",
+		"This task carries boundary rules, but the call sent no diff, so its code was not checked against them.",
+		"Send final_diff or final_diff_path with the task's change to have it checked against the boundary rules."), true
+}
+
 func diffRequiredFinding() verdict.Finding {
 	return verdict.Finding{
 		Severity:   verdict.SeverityMajor,

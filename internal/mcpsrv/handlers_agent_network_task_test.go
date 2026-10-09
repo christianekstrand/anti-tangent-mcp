@@ -222,6 +222,10 @@ func TestValidateCompletion_DiffRequired(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, callsAfterSpec+1, task.Calls, "test evidence alone is reviewed")
 	require.NotContains(t, findingCategories(env.Findings), verdict.CategoryDiffRequired)
+	require.Equal(t, []verdict.Category{verdict.CategoryBoundaryUnchecked}, findingCategories(env.Findings),
+		"a build task's code went unchecked against the rules, and the caller is told")
+	require.Equal(t, verdict.SeverityMinor, env.Findings[0].Severity)
+	require.Equal(t, "pass", env.Verdict, "the note never moves the verdict")
 
 	_, _, err = h.ValidateCompletion(context.Background(), nil, ValidateCompletionArgs{
 		SessionID: spec.SessionID, Summary: "s", FinalDiff: "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n",
@@ -250,4 +254,38 @@ func TestValidateCompletion_NoRulesDropsBoundaryViolation(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotContains(t, findingCategories(env.Findings), verdict.CategoryBoundaryViolation)
+}
+
+func TestSessionSpec_APlanHeadingFindsATaskAttachedByIndexUnderAnotherTitle(t *testing.T) {
+	h, _, _ := agentNetworkTaskHandlers(t)
+	plain := "# Plan\n\n### Task 1: Zip mapper\n\n**Goal:** map\n\n### Task 2: Zip prompt\n\n**Goal:** ask\n"
+	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: plain})
+	require.NoError(t, err)
+	_, env, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{
+		TaskTitle: "Map the ZIP fields", Goal: "map", PlanRunID: pr.PlanRunID, TaskIndex: 1,
+	})
+	require.NoError(t, err)
+	sess, ok := h.deps.Sessions.Get(env.SessionID)
+	require.True(t, ok)
+
+	_, ok = h.deps.PlanRuns.Revise(pr.PlanRunID, "pass", "rigorous", []planrun.PlanTask{
+		{Index: 1, Title: "Task 1: Probe", Kind: "experiment", Rung: "variance"},
+		{Index: 2, Title: "Task 2: Zip mapper"},
+		{Index: 3, Title: "Task 3: Zip prompt"},
+	}, "", nil, nil)
+	require.True(t, ok)
+	require.Empty(t, h.sessionSpec(sess).TaskKind, "the mapper moved to Task 2; the probe inserted above it is not its task")
+}
+
+func TestValidateCompletion_ARevertedExperimentWithRulesDrawsNoUncheckedNote(t *testing.T) {
+	h, _, _ := agentNetworkTaskHandlers(t)
+	_, spec, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{
+		TaskTitle: "Zip prompt", Goal: "ask", TaskKind: "experiment", Rung: "prompt", BoundaryRules: testRules,
+	})
+	require.NoError(t, err)
+	_, env, err := h.ValidateCompletion(context.Background(), nil, ValidateCompletionArgs{
+		SessionID: spec.SessionID, Summary: "reverted at 7/10", TestEvidence: "zip-missing 7/10",
+	})
+	require.NoError(t, err)
+	require.NotContains(t, findingCategories(env.Findings), verdict.CategoryBoundaryUnchecked, "a reverted experiment leaves no code to check")
 }

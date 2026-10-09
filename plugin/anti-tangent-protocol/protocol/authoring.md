@@ -190,6 +190,8 @@ anti-tangent ships none. A spec or change that does what a rule forbids is `boun
 major (minor at `check_progress`, which cannot see what the task added). Settle it by moving the
 work or with a controller ruling. With rules, or on an experiment, `validate_completion` needs a
 diff when it sends `final_files` or records the change as kept, or it returns `diff_required`.
+A build task with rules that sends no diff and no files draws `boundary_unchecked`: nothing was
+checked against the rules.
 `boundary_rules_missing` and `plan_kind_missing` say one of the two declarations is missing.
 These notes are minor and never move a verdict.
 

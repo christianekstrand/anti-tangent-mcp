@@ -2200,6 +2200,9 @@ func (h *handlers) ValidateCompletion(ctx context.Context, _ *mcp.CallToolReques
 		env.Findings = append(env.Findings, noSessionResponsesAdvisory())
 	}
 	env.Findings = append(env.Findings, modeFindings...)
+	if f, ok := boundaryUncheckedNote(spec, args.FinalDiff, resolvedFiles); ok {
+		env.Findings = append(env.Findings, f)
+	}
 	if rateDigestProblem != "" {
 		env.Findings = append(env.Findings, rateDigestNote(rateDigestProblem))
 	}

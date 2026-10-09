@@ -354,7 +354,8 @@ valid outcome. Experiments are never lightweight.
 experiment, `validate_completion` needs a diff when it sends `final_files` or records a kept
 change (`diff_required`, a submission defect). Minor notes, added after the verdict and never
 moving it: `boundary_rules_missing`, `plan_kind_missing`, `kind_conflict`, `unknown_kind`,
-`rung_missing`.
+`rung_missing`, and `boundary_unchecked` for a build task with rules whose completion sent
+neither a diff nor files.
 
 **Evidence and records.** `test_evidence_path` reads test evidence from a file under
 `ANTI_TANGENT_PLAN_ROOTS`, capped by `ANTI_TANGENT_TEST_EVIDENCE_MAX_BYTES`. `rate_digest` on
