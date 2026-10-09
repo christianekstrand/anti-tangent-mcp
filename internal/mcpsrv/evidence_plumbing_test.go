@@ -191,4 +191,6 @@ func TestExtract_TestEvidencePathsTogetherOverThePayloadCap(t *testing.T) {
 	require.Zero(t, rv.Calls, "rejected before review")
 	require.Equal(t, verdict.CategoryTooLarge, r.Findings[0].Category)
 	require.Equal(t, "completion_envelopes[].test_evidence_path", r.Findings[0].Criterion)
+	require.Contains(t, r.Findings[0].Suggestion, "ANTI_TANGENT_MAX_PAYLOAD_BYTES")
+	require.NotContains(t, r.Findings[0].Suggestion, "ANTI_TANGENT_TEST_EVIDENCE_MAX_BYTES")
 }

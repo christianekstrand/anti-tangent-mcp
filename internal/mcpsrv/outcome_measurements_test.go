@@ -59,11 +59,12 @@ func TestRecordReviewOutcome_MeasurementValidation(t *testing.T) {
 	h, _, dir := outcomeHandlers(t)
 	run := h.deps.PlanRuns.Create("pass", "rigorous", 2)
 	cases := map[string][]OutcomeMeasurementArg{
-		"measurements[0].task_index must be 0":          {{TaskIndex: -1, Metric: "m"}},
-		"measurements[0].task_index 3 exceeds":          {{TaskIndex: 3, Metric: "m"}},
-		"measurements[0].metric is required":            {{TaskIndex: 1, Metric: "  "}},
-		"measurements[0].n must not be negative":        {{TaskIndex: 1, Metric: "m", N: -1}},
-		"measurements has 201 entries; at most 200 are": make([]OutcomeMeasurementArg, maxOutcomeMeasurements+1),
+		"measurements[0].task_index must be 0":            {{TaskIndex: -1, Metric: "m"}},
+		"measurements[0].task_index 3 exceeds":            {{TaskIndex: 3, Metric: "m"}},
+		"measurements[0].metric is required":              {{TaskIndex: 1, Metric: "  "}},
+		"measurements[0].n must not be negative":          {{TaskIndex: 1, Metric: "m", N: -1}},
+		"measurements[0].metric must not contain control": {{TaskIndex: 1, Metric: "a\x1b[2Jb"}},
+		"measurements has 201 entries; at most 200 are":   make([]OutcomeMeasurementArg, maxOutcomeMeasurements+1),
 	}
 	for want, ms := range cases {
 		res := recordOutcome(t, h, RecordReviewOutcomeArgs{PlanRunID: run.ID, Source: "final_review", Findings: []OutcomeFindingArg{}, Measurements: ms})

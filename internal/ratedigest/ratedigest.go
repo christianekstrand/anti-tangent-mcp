@@ -280,8 +280,9 @@ func (d *Digest) rate() string {
 }
 
 // Cell renders the plan_run_report rate column:
-// "5→8/10 · reg 0 · rig +0/+0/+0", the rigidity part counting outbound
-// strings, veto keys and state markers. A part the digest lacks is left out.
+// "5→8/10 · reg 0 · rig +0/+0/+0 · kept", the rigidity part counting
+// outbound strings, veto keys and state markers. A part the digest lacks is
+// left out.
 func (d *Digest) Cell() string {
 	if d == nil {
 		return ""
@@ -292,6 +293,9 @@ func (d *Digest) Cell() string {
 	}
 	if r := d.RigidityDelta; r != nil {
 		parts = append(parts, fmt.Sprintf("rig +%d/+%d/+%d", r.OutboundStrings, r.VetoKeys, r.StateMarkers))
+	}
+	if d.Kept != nil {
+		parts = append(parts, map[bool]string{true: "kept", false: "reverted"}[*d.Kept])
 	}
 	return strings.Join(parts, " · ")
 }

@@ -139,6 +139,7 @@ func (h *handlers) ExtractProjectKnowledge(ctx context.Context, _ *mcp.CallToolR
 			logOutcome, logModelUsed, logVerdict, logFindings = "payload_too_large", h.deps.Cfg.ExtractModel.String(), r.Verdict, r.Findings
 			return extractEnvelopeResult(r, h.deps.Cfg.ExtractModel.String(), 0)
 		}
+		logOutcome = "validation_error"
 		return nil, verdict.ExtractResult{}, err
 	}
 
@@ -569,7 +570,8 @@ func (h *handlers) resolveEnvelopeTestEvidence(envs []CompletionEnvelopeArg, cla
 		if total > h.deps.Cfg.MaxPayloadBytes {
 			res := extractTooLargeResult(total, h.deps.Cfg.MaxPayloadBytes)
 			res.Findings[0].Criterion = "completion_envelopes[].test_evidence_path"
-			res.Findings[0].Suggestion = testEvidenceShrinkAdvice
+			res.Findings[0].Suggestion = "Attach the Markdown scoreboard, or a per-eval summary, rather than raw run output, or split the envelopes over several calls. " +
+				"Together the files count toward ANTI_TANGENT_MAX_PAYLOAD_BYTES, which the operator can raise."
 			return prependExtractClamp(res, clamp), true, nil
 		}
 		e.TestEvidence, e.TestEvidencePath = content, ""

@@ -76,8 +76,9 @@ const (
 	// CategoryBoundaryViolation is emitted by the reviewer for a spec, plan
 	// task or change that does what a caller-supplied boundary rule forbids,
 	// and for a fix-ladder breach in an agent-network plan. Not in
-	// applySeverityFloor's list: the reviewer's chosen severity is kept. The
-	// server drops it from a call that sent no boundary rules, since the
+	// applySeverityFloor's list: the reviewer's chosen severity is kept.
+	// validate_plan and the per-task tools drop it from a call that sent no
+	// boundary rules, since the
 	// reviewer had no rule to judge against; a fix_ladder finding on an
 	// agent-network plan needs no rule and is kept.
 	CategoryBoundaryViolation Category = "boundary_violation"

@@ -50,12 +50,12 @@ func TestValidateCompletion_RateDigestRenderedAndStored(t *testing.T) {
 		}
 	}
 	require.NotNil(t, row.RateDigest)
-	require.Equal(t, "5→8/10 · reg 0", row.RateDigest.Cell())
+	require.Equal(t, "5→8/10 · reg 0 · kept", row.RateDigest.Cell())
 	require.Empty(t, row.RateDigest.TargetEval, "the record keeps counts, not the eval's path")
 
 	_, report, err := h.PlanRunReport(context.Background(), nil, PlanRunReportArgs{PlanRunID: pr.PlanRunID})
 	require.NoError(t, err)
-	require.Contains(t, report.SummaryBlock, "5→8/10 · reg 0")
+	require.Contains(t, report.SummaryBlock, "5→8/10 · reg 0 · kept")
 }
 
 func TestValidateCompletion_KeptWithoutADiff(t *testing.T) {

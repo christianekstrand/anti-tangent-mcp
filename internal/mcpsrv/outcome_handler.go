@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -195,6 +196,9 @@ func validateOutcomeMeasurements(ms []OutcomeMeasurementArg) string {
 		}
 		if scorecard.NormalizeCategory(m.Metric) == "" {
 			return fmt.Sprintf("measurements[%d].metric is required", i)
+		}
+		if strings.IndexFunc(m.Metric, unicode.IsControl) >= 0 {
+			return fmt.Sprintf("measurements[%d].metric must not contain control characters", i)
 		}
 		if m.N < 0 {
 			return fmt.Sprintf("measurements[%d].n must not be negative", i)

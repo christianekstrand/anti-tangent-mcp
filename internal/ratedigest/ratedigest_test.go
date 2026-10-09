@@ -31,7 +31,7 @@ func TestParse_Full(t *testing.T) {
 	require.Equal(t, &Suite{Evals: 42, Regressions: 0}, d.Suite)
 	require.True(t, d.IsKept())
 	require.Equal(t, &RigidityDelta{StrategyLines: 3}, d.RigidityDelta)
-	require.Equal(t, "5→8/10 · reg 0 · rig +0/+0/+0", d.Cell())
+	require.Equal(t, "5→8/10 · reg 0 · rig +0/+0/+0 · kept", d.Cell())
 	require.Equal(t, []string{
 		"Target eval: evals/core/zip-missing.yaml",
 		"Rate: 5→8/10 (after-rate interval 0.49–0.94)",
@@ -46,7 +46,7 @@ func TestParse_Minimal(t *testing.T) {
 	require.Empty(t, problem)
 	require.Nil(t, d.BeforeK)
 	require.False(t, d.IsKept())
-	require.Equal(t, "7/10", d.Cell())
+	require.Equal(t, "7/10 · reverted", d.Cell())
 	require.Equal(t, []string{"Rate: 7/10", "Outcome: reverted"}, d.PromptLines())
 }
 
