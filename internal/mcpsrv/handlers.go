@@ -155,10 +155,11 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 		return h.rejectTaskSpecContextPaths(cerr)
 	}
 
-	mode, modeFindings, err := h.taskSpecAgentNetwork(args)
+	resolved, err := h.taskSpecAgentNetwork(args)
 	if err != nil {
 		return nil, Envelope{}, err
 	}
+	mode, modeFindings := resolved.mode, resolved.notes
 
 	spec := session.TaskSpec{
 		Title:                        args.TaskTitle,
@@ -204,7 +205,12 @@ func (h *handlers) ValidateTaskSpec(ctx context.Context, _ *mcp.CallToolRequest,
 	result.Findings = dropUnrequestedBoundaryViolations(result.Findings, len(spec.BoundaryRules) > 0, false)
 	result.Findings = suppressTestabilityExtractionScopeDrift(result.Findings, inputs.TestabilityExtractions)
 	result.Findings = suppressUnverifiableCodebaseClaim(result.Findings, inputs.ControllerVerifiedReferences)
-	planRunID, attachedByTitle := h.taskSpecPlanRun(args, out.Truncated)
+	planRunID, attachedByTitle := resolved.runID, resolved.byTitle
+	if out.Truncated {
+		// A truncated review creates no session, so it attaches to no run
+		// by title.
+		planRunID, attachedByTitle = args.PlanRunID, false
+	}
 	taskRef := planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle}
 	if attachedByTitle {
 		// The title is what found the run and the task, so it alone names

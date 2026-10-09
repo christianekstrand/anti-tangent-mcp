@@ -240,17 +240,26 @@ func (s *Store) Create(planVerdict, planQuality string, taskCount int) *Run {
 
 // CreateWithTasks mints a run for the plan's tasks.
 func (s *Store) CreateWithTasks(planVerdict, planQuality string, tasks []PlanTask) *Run {
+	return s.CreateForPlan(planVerdict, planQuality, tasks, "", nil)
+}
+
+// CreateForPlan mints a run for the plan's tasks with the plan kind and
+// boundary rules of the validate_plan round that reviewed it. The run is
+// stored whole, so no reader sees it without its declarations.
+func (s *Store) CreateForPlan(planVerdict, planQuality string, tasks []PlanTask, planKind string, rules []string) *Run {
 	now := time.Now()
 	r := &Run{
-		ID:           newID(),
-		CreatedAt:    now,
-		LastAccessed: now,
-		PlanVerdict:  planVerdict,
-		PlanQuality:  planQuality,
-		TaskCount:    len(tasks),
-		Tasks:        cloneTasks(tasks),
-		Revision:     1,
-		sessions:     map[string]int{},
+		ID:            newID(),
+		CreatedAt:     now,
+		LastAccessed:  now,
+		PlanVerdict:   planVerdict,
+		PlanQuality:   planQuality,
+		TaskCount:     len(tasks),
+		Tasks:         cloneTasks(tasks),
+		PlanKind:      planKind,
+		BoundaryRules: append([]string(nil), rules...),
+		Revision:      1,
+		sessions:      map[string]int{},
 	}
 	s.mu.Lock()
 	s.runs[r.ID] = r
@@ -286,12 +295,12 @@ func (s *Store) SetReview(runID string, review any) bool {
 }
 
 // Revise records a later validate_plan round on run runID under one lock: the
-// run takes the round's verdict, quality, task list and review record, and
-// its revision goes up by one. Rows already attached keep their Index, so a
+// run takes the round's verdict, quality, task list, plan kind, boundary rules
+// and review record, and its revision goes up by one. Rows already attached keep their Index, so a
 // round that renumbers tasks after dispatch leaves them where they were.
 // Returns a copy of the run as this round left it, taken under the same lock,
 // and false when the run is unknown or expired.
-func (s *Store) Revise(runID, planVerdict, planQuality string, tasks []PlanTask, review any) (*Run, bool) {
+func (s *Store) Revise(runID, planVerdict, planQuality string, tasks []PlanTask, planKind string, rules []string, review any) (*Run, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.runs[runID]
@@ -302,6 +311,8 @@ func (s *Store) Revise(runID, planVerdict, planQuality string, tasks []PlanTask,
 	r.PlanQuality = planQuality
 	r.TaskCount = len(tasks)
 	r.Tasks = cloneTasks(tasks)
+	r.PlanKind = planKind
+	r.BoundaryRules = append([]string(nil), rules...)
 	r.Revision++
 	r.review = review
 	r.LastAccessed = time.Now()
@@ -333,27 +344,15 @@ func (s *Store) TaskFiles(runID string, ref TaskRef) []string {
 
 // AgentNetwork is what a plan run holds about one task's agent-network
 // declarations: the plan's kind and boundary rules, and the task's own kind
-// and rung, empty when the call names no task of the plan.
+// and rung, empty when the call names no task of the plan. TaskFound
+// reports whether it named one, so an empty kind can be told apart from no
+// task.
 type AgentNetwork struct {
 	PlanKind      string
 	BoundaryRules []string
 	TaskKind      string
 	Rung          string
-}
-
-// SetAgentNetwork stores the plan kind and boundary rules of the validate_plan
-// round that just settled run runID, replacing the previous round's. Returns
-// false when the run is unknown or expired.
-func (s *Store) SetAgentNetwork(runID, planKind string, rules []string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	r, ok := s.runs[runID]
-	if !ok {
-		return false
-	}
-	r.PlanKind = planKind
-	r.BoundaryRules = append([]string(nil), rules...)
-	return true
+	TaskFound     bool
 }
 
 // TaskAgentNetwork returns run runID's agent-network declarations for the
@@ -378,13 +377,19 @@ func (s *Store) TaskAgentNetwork(runID string, ref TaskRef) (AgentNetwork, bool)
 	if index < 1 || index > len(r.Tasks) {
 		index = r.taskByTitle(titleKey(ref.Title))
 	}
+	out.taskFrom(r, index)
+	return out, true
+}
+
+// taskFrom sets the kind and rung of r's task numbered index, and TaskFound,
+// when the plan has that task.
+func (a *AgentNetwork) taskFrom(r *Run, index int) {
 	for _, t := range r.Tasks {
 		if t.Index == index {
-			out.TaskKind, out.Rung = t.Kind, t.Rung
-			break
+			a.TaskKind, a.Rung, a.TaskFound = t.Kind, t.Rung, true
+			return
 		}
 	}
-	return out, true
 }
 
 // SessionAgentNetwork returns run runID's agent-network declarations for the
@@ -405,13 +410,15 @@ func (s *Store) SessionAgentNetwork(runID, sessionID string) (AgentNetwork, bool
 	if !ok {
 		return AgentNetwork{}, false
 	}
-	out := AgentNetwork{PlanKind: r.PlanKind, BoundaryRules: append([]string(nil), r.BoundaryRules...)}
-	for _, t := range r.Tasks {
-		if t.Index == index {
-			out.TaskKind, out.Rung = t.Kind, t.Rung
-			break
+	// A revision can renumber tasks while attached rows keep their Index, so
+	// the row's title finds the task first and its position is the fallback.
+	if pos := r.rowPos(index); pos >= 0 {
+		if byTitle := r.taskByTitle(titleKey(r.Rows[pos].TaskTitle)); byTitle != 0 {
+			index = byTitle
 		}
 	}
+	out := AgentNetwork{PlanKind: r.PlanKind, BoundaryRules: append([]string(nil), r.BoundaryRules...)}
+	out.taskFrom(r, index)
 	return out, true
 }
 

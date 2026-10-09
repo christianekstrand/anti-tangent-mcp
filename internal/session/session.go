@@ -50,6 +50,9 @@ type TaskSpec struct {
 	Rung          string   `json:"rung,omitempty"`
 	PlanKind      string   `json:"plan_kind,omitempty"`
 	BoundaryRules []string `json:"boundary_rules,omitempty"`
+	// KindFromRun reports that TaskKind and Rung came from the plan run, so a
+	// revision of the plan that clears them clears them here too.
+	KindFromRun bool `json:"kind_from_run,omitempty"`
 }
 
 // Experiment reports whether the task is an experiment: a model-behaviour

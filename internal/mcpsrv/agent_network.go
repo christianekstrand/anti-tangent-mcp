@@ -7,6 +7,7 @@ package mcpsrv
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/patiently/anti-tangent-mcp/internal/planparser"
@@ -189,6 +190,7 @@ type agentNetworkArgs struct {
 	Rung          string
 	PlanKind      string
 	BoundaryRules []string
+	KindFromRun   bool
 }
 
 // normalizeAgentNetworkArgs trims and lower-cases the declared kinds and
@@ -224,8 +226,9 @@ func normalizeAgentNetworkArgs(in agentNetworkArgs) (agentNetworkArgs, []verdict
 // resolveAgentNetwork decides a per-task call's mode. A call attached to a
 // plan run takes the run's plan kind, and the task's kind and rung when the
 // run's plan has the task; a declaration the call sent that differs is
-// ignored and noted. Boundary rules the call sends are its own, and a call
-// that sends none takes the run's. A call attached to no run keeps its own.
+// ignored and noted. Boundary rules the call sends are its own, noted when
+// they differ from the run's, and a call that sends none takes the run's. A
+// call attached to no run keeps its own.
 func resolveAgentNetwork(args agentNetworkArgs, stored planrun.AgentNetwork, attached bool, runID string) (agentNetworkArgs, []verdict.Finding) {
 	if !attached {
 		return args, nil
@@ -242,12 +245,23 @@ func resolveAgentNetwork(args agentNetworkArgs, stored planrun.AgentNetwork, att
 	if stored.TaskKind != "" {
 		conflict("task_kind", args.TaskKind, stored.TaskKind)
 		conflict("rung", args.Rung, stored.Rung)
-		out.TaskKind, out.Rung = stored.TaskKind, stored.Rung
+		out.TaskKind, out.Rung, out.KindFromRun = stored.TaskKind, stored.Rung, true
 	}
-	if len(out.BoundaryRules) == 0 {
+	switch {
+	case len(out.BoundaryRules) == 0:
 		out.BoundaryRules = stored.BoundaryRules
+	case len(stored.BoundaryRules) > 0 && !slices.Equal(out.BoundaryRules, stored.BoundaryRules):
+		notes = append(notes, rulesOverrideNote(len(out.BoundaryRules), len(stored.BoundaryRules), runID))
 	}
 	return out, notes
+}
+
+// rulesOverrideNote reports a per-task call whose own boundary rules replace
+// the different ones its plan run records.
+func rulesOverrideNote(sent, stored int, runID string) verdict.Finding {
+	return agentNote(verdict.CategoryKindConflict, "boundary_rules",
+		fmt.Sprintf("This call sent %d boundary rules that differ from the %d plan run %s records; this task is reviewed against the call's rules only.", sent, stored, runID),
+		"Leave boundary_rules out of per-task calls on a plan run, so the task inherits the run's rules, unless replacing them for this task is intended.")
 }
 
 // modeNotes returns the notes a resolved per-task mode draws: an experiment
@@ -263,11 +277,13 @@ func modeNotes(m agentNetworkArgs) []verdict.Finding {
 
 func (m agentNetworkArgs) applyTo(spec *session.TaskSpec) {
 	spec.TaskKind, spec.Rung, spec.PlanKind, spec.BoundaryRules = m.TaskKind, m.Rung, m.PlanKind, m.BoundaryRules
+	spec.KindFromRun = m.KindFromRun
 }
 
 // sessionSpec returns the session's task spec with the task kind, rung and
 // plan kind its plan run records now, so a plan revised after the task
-// started is reviewed in its new mode. Boundary rules stay as the task's
+// started is reviewed in its new mode. A kind the call declared itself stays
+// unless the plan now declares one. Boundary rules stay as the task's
 // validate_task_spec call resolved them.
 func (h *handlers) sessionSpec(sess *session.Session) session.TaskSpec {
 	spec := sess.Spec
@@ -279,8 +295,9 @@ func (h *handlers) sessionSpec(sess *session.Session) session.TaskSpec {
 		return spec
 	}
 	spec.PlanKind = stored.PlanKind
-	if stored.TaskKind != "" {
+	if stored.TaskFound && (stored.TaskKind != "" || spec.KindFromRun) {
 		spec.TaskKind, spec.Rung = stored.TaskKind, stored.Rung
+		spec.KindFromRun = stored.TaskKind != ""
 	}
 	return spec
 }
@@ -359,16 +376,26 @@ func kindConflictNote(field, sent, kept, runID string) verdict.Finding {
 		"Pass the value validate_plan returned for this task, or change the plan and run validate_plan again.")
 }
 
+// taskSpecMode is a validate_task_spec call's resolved mode, its notes, and
+// the plan run it resolved against: the run it names, or the one its title
+// finds (byTitle). The call attaches to that same run after its review.
+type taskSpecMode struct {
+	mode    agentNetworkArgs
+	notes   []verdict.Finding
+	runID   string
+	byTitle bool
+}
+
 // taskSpecAgentNetwork resolves a validate_task_spec call's mode against the
-// plan run it attaches to: the run it names, or the one its title finds.
-func (h *handlers) taskSpecAgentNetwork(args ValidateTaskSpecArgs) (agentNetworkArgs, []verdict.Finding, error) {
+// plan run it attaches to.
+func (h *handlers) taskSpecAgentNetwork(args ValidateTaskSpecArgs) (taskSpecMode, error) {
 	sent, notes, err := normalizeAgentNetworkArgs(agentNetworkArgs{
 		TaskKind: args.TaskKind, Rung: args.Rung, PlanKind: args.PlanKind, BoundaryRules: args.BoundaryRules,
 	})
 	if err != nil {
-		return agentNetworkArgs{}, nil, err
+		return taskSpecMode{}, err
 	}
-	runID, byTitle := h.taskSpecPlanRun(args, false)
+	runID, byTitle := h.taskSpecPlanRun(args)
 	ref := planrun.TaskRef{Index: args.TaskIndex, Title: args.TaskTitle}
 	if byTitle {
 		ref.Index = 0
@@ -376,7 +403,7 @@ func (h *handlers) taskSpecAgentNetwork(args ValidateTaskSpecArgs) (agentNetwork
 	stored, attached := h.deps.PlanRuns.TaskAgentNetwork(runID, ref)
 	mode, conflicts := resolveAgentNetwork(sent, stored, attached, runID)
 	notes = append(notes, conflicts...)
-	return mode, append(notes, modeNotes(mode)...), nil
+	return taskSpecMode{mode: mode, notes: append(notes, modeNotes(mode)...), runID: runID, byTitle: byTitle}, nil
 }
 
 // lightweightAgentNetwork resolves a lightweight validate_completion's mode

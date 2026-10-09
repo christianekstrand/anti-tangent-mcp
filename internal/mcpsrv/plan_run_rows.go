@@ -39,11 +39,9 @@ func (h *handlers) taskIndexAdvisory(runID string, index int) (verdict.Finding, 
 
 // taskSpecPlanRun returns the plan run a validate_task_spec call belongs to:
 // the one it names, else the server's single live run when the task's title
-// matches one of that run's headings. byTitle reports the second case. A
-// truncated review creates no session and so attaches to nothing: it finds
-// no run by title.
-func (h *handlers) taskSpecPlanRun(args ValidateTaskSpecArgs, truncated bool) (runID string, byTitle bool) {
-	if args.PlanRunID != "" || truncated {
+// matches one of that run's headings. byTitle reports the second case.
+func (h *handlers) taskSpecPlanRun(args ValidateTaskSpecArgs) (runID string, byTitle bool) {
+	if args.PlanRunID != "" {
 		return args.PlanRunID, false
 	}
 	return h.deps.PlanRuns.SoleLiveByTitle(args.TaskTitle)

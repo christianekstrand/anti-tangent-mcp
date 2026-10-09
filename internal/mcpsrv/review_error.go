@@ -256,9 +256,8 @@ func (c planCallContext) mintPlanRunID(pr *verdict.PlanResult) {
 	if pr.PlanRunID != "" {
 		return
 	}
-	run := c.PlanRuns.CreateWithTasks(string(pr.PlanVerdict), string(pr.PlanQuality), planRunTasks(*pr, c.Tasks, c.PlanKind))
+	run := c.PlanRuns.CreateForPlan(string(pr.PlanVerdict), string(pr.PlanQuality), planRunTasks(*pr, c.Tasks, c.PlanKind), c.PlanKind, c.BoundaryRules)
 	pr.PlanRunID = run.ID
-	c.PlanRuns.SetAgentNetwork(run.ID, c.PlanKind, c.BoundaryRules)
 	c.writeRunHeader(run, *pr)
 }
 
@@ -299,10 +298,9 @@ func (c planCallContext) writeRunHeader(run *planrun.Run, pr verdict.PlanResult)
 // finish reports to the caller as an id that names no live run.
 func (c planCallContext) settlePlanRun(pr *verdict.PlanResult, review *planReview) {
 	if c.Round.RunID != "" {
-		run, ok := c.PlanRuns.Revise(c.Round.RunID, string(pr.PlanVerdict), string(pr.PlanQuality), planRunTasks(*pr, c.Tasks, c.PlanKind), review)
+		run, ok := c.PlanRuns.Revise(c.Round.RunID, string(pr.PlanVerdict), string(pr.PlanQuality), planRunTasks(*pr, c.Tasks, c.PlanKind), c.PlanKind, c.BoundaryRules, review)
 		if ok {
 			pr.PlanRunID = run.ID
-			c.PlanRuns.SetAgentNetwork(run.ID, c.PlanKind, c.BoundaryRules)
 			if pr.ReviewScope != nil {
 				// Two rounds on one run can both start from the same
 				// revision; the store's count is the one that is true.

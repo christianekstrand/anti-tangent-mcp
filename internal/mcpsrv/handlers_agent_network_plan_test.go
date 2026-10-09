@@ -78,7 +78,7 @@ func TestValidatePlan_AgentNetwork_NoRules(t *testing.T) {
 
 	got, ok := h.deps.PlanRuns.TaskAgentNetwork(pr.PlanRunID, planrun.TaskRef{Index: 2})
 	require.True(t, ok)
-	require.Equal(t, planrun.AgentNetwork{PlanKind: "agent-network", TaskKind: "experiment"}, got)
+	require.Equal(t, planrun.AgentNetwork{PlanKind: "agent-network", TaskKind: "experiment", TaskFound: true}, got)
 }
 
 func TestValidatePlan_AgentNetwork_WithRules(t *testing.T) {
@@ -144,7 +144,7 @@ func TestValidatePlan_PlainPlanUnchanged(t *testing.T) {
 	require.Empty(t, pr.Tasks[0].TaskKind, "a plain plan declares no task kind")
 	got, ok := h.deps.PlanRuns.TaskAgentNetwork(pr.PlanRunID, planrun.TaskRef{Index: 1})
 	require.True(t, ok)
-	require.Equal(t, planrun.AgentNetwork{}, got, "a plain plan's run stores no declaration")
+	require.Equal(t, planrun.AgentNetwork{TaskFound: true}, got, "a plain plan's run stores no declaration")
 	for _, marker := range []string{"## Boundary rules", "### Fix ladder", "determinism_demand", "experiment_protocol"} {
 		require.NotContains(t, rv.LastRequest.User, marker)
 	}

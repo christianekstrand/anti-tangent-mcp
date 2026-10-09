@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/patiently/anti-tangent-mcp/internal/config"
+	"github.com/patiently/anti-tangent-mcp/internal/planrun"
 	"github.com/patiently/anti-tangent-mcp/internal/providers"
 	"github.com/patiently/anti-tangent-mcp/internal/verdict"
 )
@@ -105,6 +106,60 @@ func TestValidateTaskSpec_OwnRulesOverrideTheRun(t *testing.T) {
 	sess, _ := h.deps.Sessions.Get(env.SessionID)
 	require.Equal(t, own, sess.Spec.BoundaryRules)
 	require.Equal(t, "build", sess.Spec.TaskKind)
+	require.Contains(t, findingCategories(env.Findings), verdict.CategoryKindConflict, "replacing the run's rules is noted")
+	var note verdict.Finding
+	for _, f := range env.Findings {
+		if f.Criterion == "boundary_rules" {
+			note = f
+		}
+	}
+	require.Contains(t, note.Evidence, "reviewed against the call's rules only")
+}
+
+func TestValidateTaskSpec_SameRulesAsTheRunDrawNoNote(t *testing.T) {
+	h, _, _ := agentNetworkTaskHandlers(t)
+	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: agentNetworkPlanText, BoundaryRules: testRules})
+	require.NoError(t, err)
+	_, env, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{
+		TaskTitle: "Task 1: Zip mapper", Goal: "map", PlanRunID: pr.PlanRunID, TaskIndex: 1, BoundaryRules: testRules,
+	})
+	require.NoError(t, err)
+	require.NotContains(t, findingCategories(env.Findings), verdict.CategoryKindConflict)
+}
+
+func TestSessionSpec_APlainPlanRevisionThatDropsKindExperiment(t *testing.T) {
+	h, _, _ := agentNetworkTaskHandlers(t)
+	withKind := "# Plan\n\n### Task 1: Zip mapper\n\n**Goal:** map\n\n### Task 2: Zip prompt\n\n**Kind:** experiment\n\n**Goal:** ask\n"
+	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: withKind})
+	require.NoError(t, err)
+	_, env, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{
+		TaskTitle: "Task 2: Zip prompt", Goal: "ask", PlanRunID: pr.PlanRunID, TaskIndex: 2,
+	})
+	require.NoError(t, err)
+	sess, ok := h.deps.Sessions.Get(env.SessionID)
+	require.True(t, ok)
+	require.Equal(t, "experiment", h.sessionSpec(sess).TaskKind)
+
+	// The run as a revision without the Kind line leaves it: a plain plan
+	// declares no task kind.
+	_, ok = h.deps.PlanRuns.Revise(pr.PlanRunID, "pass", "rigorous", []planrun.PlanTask{
+		{Index: 1, Title: "Task 1: Zip mapper"}, {Index: 2, Title: "Task 2: Zip prompt"},
+	}, "", nil, nil)
+	require.True(t, ok)
+	require.Empty(t, h.sessionSpec(sess).TaskKind, "the plan no longer declares an experiment")
+}
+
+func TestSessionSpec_KeepsAKindTheCallDeclaredItself(t *testing.T) {
+	h, _, _ := agentNetworkTaskHandlers(t)
+	plain := "# Plan\n\n### Task 1: Zip mapper\n\n**Goal:** map\n\n### Task 2: Zip prompt\n\n**Goal:** ask\n"
+	_, pr, err := h.ValidatePlan(context.Background(), nil, ValidatePlanArgs{PlanText: plain})
+	require.NoError(t, err)
+	_, env, err := h.ValidateTaskSpec(context.Background(), nil, ValidateTaskSpecArgs{
+		TaskTitle: "Task 2: Zip prompt", Goal: "ask", PlanRunID: pr.PlanRunID, TaskIndex: 2, TaskKind: "experiment", Rung: "prompt",
+	})
+	require.NoError(t, err)
+	sess, _ := h.deps.Sessions.Get(env.SessionID)
+	require.Equal(t, "experiment", h.sessionSpec(sess).TaskKind)
 }
 
 func TestValidateTaskSpec_UnknownArgValues(t *testing.T) {
