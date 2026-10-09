@@ -15,7 +15,7 @@ This is agent-network work, so over-building has one more tag, `rigidity:`, for 
 {{end}}
 {{define "determinism_demands"}}An acceptance criterion that demands that model behaviour holds in every run — "100%", "always", "never", "every run", or one passing run offered as proof — asks for what a model cannot give, and pushes the implementer toward rigid code. Report it as `category: ambiguous_spec`, `criterion: determinism_demand`, `severity: major`, quoting the criterion in `evidence`. In `suggestion`, either rewrite it as a rate — a named eval, n of at least 10, a threshold and a baseline — or, when it guards a commitment code can check from structured data (a consent stamp, a submission, eligibility, verbatim legal text), move it to a deterministic code check, where 100% is correct.
 
-Not a determinism demand: a safety invariant checked deterministically from structured state; verbatim legal text; any criterion of a build task about code output or structured state. An agent-network plan also has deterministic tasks — mappers, a consent recognizer, harness code — and "never" and "100%" are right there.
+Not a determinism demand: a safety invariant checked deterministically from structured state; verbatim legal text; any criterion of a build task about code output or structured state. An agent-network plan also has deterministic tasks — mappers, an opt-out keyword matcher, harness code — and "never" and "100%" are right there.
 {{end}}{{define "experiment_protocol"}}An experiment is a change to model behaviour that is measured, then kept or reverted. Its acceptance criteria must state the protocol, not a guaranteed outcome: the target eval, n, the baseline rate, the threshold, and the keep-or-revert rule. Report each of these as `category: missing_acceptance_criterion`, `criterion: experiment_protocol`, `severity: major`:
 
 - a piece of the protocol that is missing;
@@ -30,6 +30,8 @@ This plan is agent-network work. A task's `**Rung:**` header names the fix-ladde
 
 - A task at rung `commitment` whose `Context:` gives no evidence that the lower rungs — oracle, variance, facts, tool — were ruled out: report `category: boundary_violation`, `criterion: fix_ladder`, `severity: major`, {{.}}.
 - When every fix task in the plan is at rung `commitment`, and none is at `facts` or `prompt`, report it once as a plan-level finding with the same category, criterion and severity.
+
+Only `commitment` is checked: a code gate is the rung that makes the network rigid, so it is the one that must show the lower rungs were tried. Do not report a task at another rung for skipping rungs.
 
 {{end}}{{define "rates_as_evidence"}}### Rates as evidence
 

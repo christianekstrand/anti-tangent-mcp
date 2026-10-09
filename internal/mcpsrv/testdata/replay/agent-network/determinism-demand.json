@@ -19,11 +19,18 @@
     {
       "call": "validate_task_spec",
       "any_of_keywords": [
-        "determinism",
-        "100%",
-        "rate"
+        "100% of runs"
       ],
       "criterion": "determinism_demand"
+    },
+    {
+      "call": "validate_task_spec",
+      "any_of_keywords": [
+        "five digits",
+        "never writes"
+      ],
+      "criterion": "determinism_demand",
+      "absent": true
     }
   ]
 }

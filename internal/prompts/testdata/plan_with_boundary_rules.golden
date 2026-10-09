@@ -104,7 +104,7 @@ still misimplement; minor = nit.
 
 An acceptance criterion that demands that model behaviour holds in every run — "100%", "always", "never", "every run", or one passing run offered as proof — asks for what a model cannot give, and pushes the implementer toward rigid code. Report it as `category: ambiguous_spec`, `criterion: determinism_demand`, `severity: major`, quoting the criterion in `evidence`. In `suggestion`, either rewrite it as a rate — a named eval, n of at least 10, a threshold and a baseline — or, when it guards a commitment code can check from structured data (a consent stamp, a submission, eligibility, verbatim legal text), move it to a deterministic code check, where 100% is correct.
 
-Not a determinism demand: a safety invariant checked deterministically from structured state; verbatim legal text; any criterion of a build task about code output or structured state. An agent-network plan also has deterministic tasks — mappers, a consent recognizer, harness code — and "never" and "100%" are right there.
+Not a determinism demand: a safety invariant checked deterministically from structured state; verbatim legal text; any criterion of a build task about code output or structured state. An agent-network plan also has deterministic tasks — mappers, an opt-out keyword matcher, harness code — and "never" and "100%" are right there.
 
 ### Fix ladder
 
@@ -112,6 +112,8 @@ This plan is agent-network work. A task's `**Rung:**` header names the fix-ladde
 
 - A task at rung `commitment` whose `Context:` gives no evidence that the lower rungs — oracle, variance, facts, tool — were ruled out: report `category: boundary_violation`, `criterion: fix_ladder`, `severity: major`, in that task's findings.
 - When every fix task in the plan is at rung `commitment`, and none is at `facts` or `prompt`, report it once as a plan-level finding with the same category, criterion and severity.
+
+Only `commitment` is checked: a code gate is the rung that makes the network rigid, so it is the one that must show the lower rungs were tried. Do not report a task at another rung for skipping rungs.
 
 **Boundary breaches.** Check each task's acceptance criteria, steps and `Context:` against the boundary rules: report one that requires what a rule forbids at `severity: major`, in that task's findings. A breach that shows only across tasks — one task writes outbound text that a later task's code then matches on, say — is a plan-level finding at `severity: major`.
 

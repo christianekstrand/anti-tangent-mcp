@@ -54,10 +54,10 @@ is not configured, skip this step silently.
 
 **3. Before reporting DONE (REQUIRED).** Call `validate_completion` with
 the session_id, your summary, **a complete `final_diff` (or full
-`final_files`)**, and test evidence. A complete diff is a **precondition
-of the first call**, not something to add after a rejection —
-evidence-poor submissions usually fail and buy you a formatting review
-instead of a code review.
+`final_files`, but not under boundary rules or on an experiment)**, and
+test evidence. A complete diff is a **precondition of the first call**,
+not something to add after a rejection — evidence-poor submissions buy a
+formatting review, not a code review.
 **Copy the `summary_block` field from the response verbatim into your DONE report.**
 If the verdict is `fail` or contains `critical`/`major` findings, do
 not report DONE — fix the findings and re-validate. **Exception: when the

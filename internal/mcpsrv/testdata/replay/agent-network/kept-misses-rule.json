@@ -37,7 +37,7 @@
     {
       "call": "validate_completion",
       "any_of_keywords": [
-        "missing_acceptance_criterion"
+        "9/10"
       ]
     }
   ]

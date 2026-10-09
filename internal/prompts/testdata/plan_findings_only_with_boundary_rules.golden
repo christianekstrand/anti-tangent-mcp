@@ -83,6 +83,8 @@ This plan is agent-network work. A task's `**Rung:**` header names the fix-ladde
 - A task at rung `commitment` whose `Context:` gives no evidence that the lower rungs — oracle, variance, facts, tool — were ruled out: report `category: boundary_violation`, `criterion: fix_ladder`, `severity: major`, as a plan-level finding that names the task in `evidence`.
 - When every fix task in the plan is at rung `commitment`, and none is at `facts` or `prompt`, report it once as a plan-level finding with the same category, criterion and severity.
 
+Only `commitment` is checked: a code gate is the rung that makes the network rigid, so it is the one that must show the lower rungs were tried. Do not report a task at another rung for skipping rungs.
+
 **Boundary breaches.** A breach of the boundary rules inside one task is reported by the per-task calls. Report one here only when it shows across tasks — one task writes outbound text that a later task's code then matches on, say — as a plan-level finding at `severity: major`.
 
 ### Over-building across tasks

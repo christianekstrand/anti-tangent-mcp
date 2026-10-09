@@ -92,7 +92,7 @@ still misimplement; minor = nit.
 
 An acceptance criterion that demands that model behaviour holds in every run — "100%", "always", "never", "every run", or one passing run offered as proof — asks for what a model cannot give, and pushes the implementer toward rigid code. Report it as `category: ambiguous_spec`, `criterion: determinism_demand`, `severity: major`, quoting the criterion in `evidence`. In `suggestion`, either rewrite it as a rate — a named eval, n of at least 10, a threshold and a baseline — or, when it guards a commitment code can check from structured data (a consent stamp, a submission, eligibility, verbatim legal text), move it to a deterministic code check, where 100% is correct.
 
-Not a determinism demand: a safety invariant checked deterministically from structured state; verbatim legal text; any criterion of a build task about code output or structured state. An agent-network plan also has deterministic tasks — mappers, a consent recognizer, harness code — and "never" and "100%" are right there.
+Not a determinism demand: a safety invariant checked deterministically from structured state; verbatim legal text; any criterion of a build task about code output or structured state. An agent-network plan also has deterministic tasks — mappers, an opt-out keyword matcher, harness code — and "never" and "100%" are right there.
 
 **Experiment protocol.** These tasks in the list above are experiments:
 - Task 2: Zip prompt

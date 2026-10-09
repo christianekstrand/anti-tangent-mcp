@@ -165,7 +165,7 @@ state the outcome and let the implementer pick the leanest structure that delive
 
 ### 3.11 Agent-network plans and experiment tasks
 
-An agent-network plan builds model behaviour: replies an LLM writes, judged by evals. Declare it,
+Needs anti-tangent-mcp 0.28.0 or later. An agent-network plan builds model behaviour: replies an LLM writes, judged by evals. Declare it,
 or the reviewer pushes that work into code — a regex where a prompt change belonged, a "100% of
 runs" criterion no model can meet.
 
@@ -178,13 +178,14 @@ runs" criterion no model can meet.
   rung the task works at. An experiment without one draws `rung_missing`. A `commitment` task
   (a code gate) whose `Context:` does not rule out the lower rungs is a `fix_ladder` finding.
 
-`validate_plan` returns `task_kind`, `rung` and `plan_kind` per task; pass them on every
-per-task call. The plan run's values win when the call attaches to it (`kind_conflict` notes a
+`validate_plan` returns `task_kind`, `rung` and `plan_kind` per task; pass them on
+`validate_task_spec` and a lightweight `validate_completion` (a session carries them on). The plan run's values win when the call attaches to it (`kind_conflict` notes a
 different one), and an unknown value draws `unknown_kind`. A plan with no `**Plan kind:**`
 header may use `Kind:` and `Rung:` labels of its own: their unknown values draw nothing.
 
 Pass your project's boundary rules — what code may do with reply and user text — as
-`boundary_rules` on `validate_plan`; a per-task call attached to the run inherits them.
+`boundary_rules` on `validate_plan`; a per-task call attached to the run inherits them, and
+rules it sends itself replace them for that task, noted as `kind_conflict`.
 anti-tangent ships none. A spec or change that does what a rule forbids is `boundary_violation`,
 major (minor at `check_progress`, which cannot see what the task added). Settle it by moving the
 work or with a controller ruling. With rules, or on an experiment, `validate_completion` needs a

@@ -44,7 +44,8 @@ func dropUnrequestedBoundaryViolations(fs []verdict.Finding, hasRules, agentNetw
 	}
 	out := make([]verdict.Finding, 0, len(fs))
 	for _, f := range fs {
-		if f.Category == verdict.CategoryBoundaryViolation && !(agentNetwork && f.Criterion == fixLadderCriterion) {
+		fixLadder := strings.EqualFold(strings.TrimSpace(f.Criterion), fixLadderCriterion)
+		if f.Category == verdict.CategoryBoundaryViolation && !(agentNetwork && fixLadder) {
 			continue
 		}
 		out = append(out, f)
@@ -174,7 +175,7 @@ func rungMissingNote() verdict.Finding {
 func boundaryRulesMissingNote() verdict.Finding {
 	return agentNote(verdict.CategoryBoundaryRulesMissing, "boundary_rules",
 		"This is agent-network work, but the call sent no boundary_rules, so nothing is checked against a boundary rule.",
-		"Pass the project's boundary rules as boundary_rules on validate_plan and on every per-task call.")
+		"Pass the project's boundary rules as boundary_rules on validate_plan, or on validate_task_spec and a lightweight validate_completion; a session carries them to its later calls.")
 }
 
 func planKindMissingNote() verdict.Finding {
