@@ -63,10 +63,6 @@ type TaskRow struct {
 	// Unmatched marks a row that named no plan task, by index or by title. It
 	// is numbered after the plan's tasks.
 	Unmatched bool `json:"unmatched,omitempty"`
-	// heading is the plan heading of the task the row was matched to, kept
-	// apart from TaskTitle because a caller's title may paraphrase it. It is
-	// what finds the row's task again after a revision renumbers the plan.
-	heading string
 	// Calls logs every anti-tangent call made for this task, oldest first,
 	// capped by AppendCall.
 	Calls        []ToolCall `json:"calls,omitempty"`
@@ -152,10 +148,19 @@ type Run struct {
 	// store never looks inside it and hands back the same value, so the caller
 	// must treat a stored value as immutable.
 	review any
-	// sessions maps every session ever attached to a row to that row's Index,
-	// so an implementer that re-validated and carried on with its first
-	// session still updates its task.
-	sessions map[string]int
+	// sessions maps every session ever attached to a row to that row, so an
+	// implementer that re-validated and carried on with its first session
+	// still updates its task.
+	sessions map[string]sessionRef
+}
+
+// sessionRef is the row a session attached to and the plan heading of the
+// task it resolved to then. The heading is kept per session, apart from the
+// row, because a caller's title may paraphrase it and because a revision can
+// leave an earlier task's row at the Index a later task resolves to.
+type sessionRef struct {
+	index   int
+	heading string
 }
 
 // Store holds plan runs in memory.
@@ -263,7 +268,7 @@ func (s *Store) CreateForPlan(planVerdict, planQuality string, tasks []PlanTask,
 		PlanKind:      planKind,
 		BoundaryRules: append([]string(nil), rules...),
 		Revision:      1,
-		sessions:      map[string]int{},
+		sessions:      map[string]sessionRef{},
 	}
 	s.mu.Lock()
 	s.runs[r.ID] = r
@@ -410,21 +415,20 @@ func (s *Store) SessionAgentNetwork(runID, sessionID string) (AgentNetwork, bool
 	if !ok {
 		return AgentNetwork{}, false
 	}
-	index, ok := r.sessions[sessionID]
+	ref, ok := r.sessions[sessionID]
 	if !ok {
 		return AgentNetwork{}, false
 	}
 	// A revision can renumber tasks while attached rows keep their Index, so
-	// the row's plan heading, else its title, finds the task first and its
-	// position is the fallback.
-	if pos := r.rowPos(index); pos >= 0 {
-		key := titleKey(r.Rows[pos].heading)
-		if key == "" {
-			key = titleKey(r.Rows[pos].TaskTitle)
-		}
-		if byTitle := r.taskByTitle(key); byTitle != 0 {
-			index = byTitle
-		}
+	// the session's plan heading, else its row's title, finds the task first
+	// and the row's position is the fallback.
+	index := ref.index
+	key := titleKey(ref.heading)
+	if pos := r.rowPos(index); key == "" && pos >= 0 {
+		key = titleKey(r.Rows[pos].TaskTitle)
+	}
+	if byTitle := r.taskByTitle(key); key != "" && byTitle != 0 {
+		index = byTitle
 	}
 	out := AgentNetwork{PlanKind: r.PlanKind, BoundaryRules: append([]string(nil), r.BoundaryRules...)}
 	out.taskFrom(r, index)
@@ -600,16 +604,16 @@ func (s *Store) Attach(runID, sessionID string, ref TaskRef, preVerdict string) 
 	if !ok || ref.empty() {
 		return TaskRow{}, false
 	}
-	pos := r.rowFor(ref, false)
+	pos, task := r.rowFor(ref, false)
 	row := &r.Rows[pos]
 	row.SessionID = sessionID
 	row.PreVerdict = preVerdict
 	row.Attempts++
 	row.Lite = false
 	if r.sessions == nil {
-		r.sessions = map[string]int{}
+		r.sessions = map[string]sessionRef{}
 	}
-	r.sessions[sessionID] = row.Index
+	r.sessions[sessionID] = sessionRef{index: row.Index, heading: r.taskTitle(task)}
 	r.LastAccessed = time.Now()
 	return cloneRow(*row), true
 }
@@ -624,11 +628,11 @@ func (s *Store) UpdateRow(runID, sessionID string, mutate func(*TaskRow)) (TaskR
 	if !ok {
 		return TaskRow{}, false
 	}
-	index, ok := r.sessions[sessionID]
+	ref, ok := r.sessions[sessionID]
 	if !ok {
 		return TaskRow{}, false
 	}
-	pos := r.rowPos(index)
+	pos := r.rowPos(ref.index)
 	if pos < 0 {
 		return TaskRow{}, false
 	}
@@ -648,30 +652,31 @@ func (s *Store) UpsertLite(runID string, ref TaskRef, mutate func(*TaskRow)) (Ta
 	if !ok || ref.empty() {
 		return TaskRow{}, false
 	}
-	pos := r.rowFor(ref, true)
+	pos, _ := r.rowFor(ref, true)
 	mutate(&r.Rows[pos])
 	r.LastAccessed = time.Now()
 	return cloneRow(r.Rows[pos]), true
 }
 
 // rowFor returns the position of the row ref names, adding the row when the
-// task has none. A new row takes the plan's heading when ref carries no title.
-func (r *Run) rowFor(ref TaskRef, lite bool) int {
+// task has none, and the Index of the plan task ref resolved to, or 0 when it
+// named none. A new row takes the plan's heading when ref carries no title.
+func (r *Run) rowFor(ref TaskRef, lite bool) (pos, task int) {
 	pos, index, unmatched := r.resolve(ref)
-	if pos < 0 {
-		title := ref.Title
-		if strings.TrimSpace(title) == "" {
-			title = r.taskTitle(index)
-		}
-		pos = r.insertRow(TaskRow{
-			Index: index, TaskTitle: title, Unmatched: unmatched, Lite: lite,
-			CodesceneState: StateMissing,
-		})
+	if !unmatched {
+		task = index
 	}
-	if row := &r.Rows[pos]; row.heading == "" && !row.Unmatched {
-		row.heading = r.taskTitle(row.Index)
+	if pos >= 0 {
+		return pos, task
 	}
-	return pos
+	title := ref.Title
+	if strings.TrimSpace(title) == "" {
+		title = r.taskTitle(index)
+	}
+	return r.insertRow(TaskRow{
+		Index: index, TaskTitle: title, Unmatched: unmatched, Lite: lite,
+		CodesceneState: StateMissing,
+	}), task
 }
 
 // resolve finds the row ref names: by ref.Index when it is one of the plan's

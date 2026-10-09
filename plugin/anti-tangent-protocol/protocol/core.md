@@ -56,7 +56,7 @@ none demotes it to `unverifiable_codebase_claim`, floor, rollup and force-pass i
 - State commit-policy carve-outs literally in the plan. The reviewer sees only the plan
   content you provide — via `plan_text` or `plan_path` — never repo policy files like
   `CLAUDE.md` / `AGENTS.md`.
-- For doc deliverables, send full `final_files` (with boundary rules, also `final_diff`); summaries are often insufficient.
+- Doc deliverables: full `final_files`; with boundary rules or an experiment, a full `final_diff` instead. Not summaries.
 
 ### Choosing `pinned_by`, `context`, and `controller_verified_references`
 

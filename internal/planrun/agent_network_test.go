@@ -215,3 +215,26 @@ func TestCreateForPlanAndRevise_StoreTheDeclarationsWithTheTasks(t *testing.T) {
 	require.Empty(t, got.PlanKind)
 	require.Empty(t, got.BoundaryRules)
 }
+
+func TestSessionAgentNetwork_ATaskInsertedByARevisionIsItsOwnSessionsTask(t *testing.T) {
+	s := NewStore(time.Hour)
+	run := agentNetworkRun(t, s)
+	_, ok := s.Attach(run.ID, "sess-mapper", TaskRef{Index: 1, Title: "Map the ZIP fields"}, "pass")
+	require.True(t, ok)
+
+	_, ok = s.Revise(run.ID, "pass", "rigorous", []PlanTask{
+		{Index: 1, Title: "Task 1: Probe", Kind: "experiment", Rung: "variance"},
+		{Index: 2, Title: "Task 2: Mapper", Kind: "build"},
+		{Index: 3, Title: "Task 3: Zip prompt", Kind: "experiment", Rung: "prompt"},
+	}, "agent-network", nil, nil)
+	require.True(t, ok)
+	_, ok = s.Attach(run.ID, "sess-probe", TaskRef{Index: 1}, "pass")
+	require.True(t, ok)
+
+	got, ok := s.SessionAgentNetwork(run.ID, "sess-probe")
+	require.True(t, ok)
+	require.Equal(t, "experiment", got.TaskKind, "the probe's session is reviewed as the probe")
+	require.Equal(t, "variance", got.Rung)
+	got, _ = s.SessionAgentNetwork(run.ID, "sess-mapper")
+	require.Equal(t, "build", got.TaskKind, "the mapper's session still follows the mapper")
+}
